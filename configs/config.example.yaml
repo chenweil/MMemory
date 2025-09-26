@@ -1,0 +1,13 @@
+bot:
+  token: "your_telegram_bot_token_here"
+  debug: true
+
+database:
+  dsn: "./data/mmemory_example.db"
+
+logging:
+  level: "debug"
+  format: "text"
+
+app:
+  environment: "development"

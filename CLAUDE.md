@@ -131,6 +131,23 @@ Critical environment variables:
 - Bot layer provides user-friendly error messages in Chinese
 - All errors are logged with structured logging using Logrus
 
+## Development Workflow
+
+### 阶段性开发流程
+每个开发阶段必须按以下顺序完成：
+
+1. **编写单元测试** - 为当前阶段的核心功能编写测试
+2. **运行测试验证** - 确保所有测试通过，功能正常
+3. **更新技术文档** - 更新项目方案文档，记录完成情况
+4. **代码提交** - 提交当前阶段的完整代码
+5. **更新计划文档** - 更新下一阶段的开发计划
+
+### 测试要求
+- 每个service层方法必须有对应的单元测试
+- 数据库操作需要集成测试
+- 关键业务逻辑需要边界值测试
+- 错误处理路径需要测试覆盖
+
 ## Testing Strategy
 
 - Unit tests for service layer business logic

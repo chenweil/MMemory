@@ -1,0 +1,33 @@
+# 忽略日志文件
+*.log
+
+# 忽略开发环境的配置文件
+config.local.yaml
+config.dev.yaml
+
+# 忽略 IDE 文件
+.vscode/
+.idea/
+
+# 忽略操作系统文件
+.DS_Store
+Thumbs.db
+
+# 忽略 Go 构建文件
+/bin/
+/dist/
+
+# 忽略数据库文件
+/data/*.db
+/data/*.sqlite
+/data/*.sqlite3
+
+# 忽略临时文件
+/tmp/
+*.tmp
+*.temp
+
+# 忽略环境变量文件
+.env
+.env.local
+.env.*.local

@@ -1,0 +1,32 @@
+bot:
+  token: "${TELEGRAM_BOT_TOKEN}"
+  debug: false
+  webhook:
+    enabled: false
+    url: ""
+    port: 8443
+
+database:
+  driver: "sqlite3"
+  dsn: "./data/mmemory.db"
+  max_open_conns: 25
+  max_idle_conns: 10
+
+server:
+  port: 8080
+  host: "0.0.0.0"
+  
+scheduler:
+  timezone: "Asia/Shanghai"
+  max_workers: 10
+  
+logging:
+  level: "info"  # debug, info, warn, error
+  format: "json"  # json, text
+  output: "stdout"  # stdout, file
+  file_path: "./data/mmemory.log"
+  
+app:
+  name: "MMemory"
+  version: "v0.0.1"
+  environment: "development"  # development, production
