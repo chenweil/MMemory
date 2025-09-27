@@ -1,5 +1,5 @@
 bot:
-  token: "${TELEGRAM_BOT_TOKEN}"
+  token: "8479463724:AAHzlbx-9qMUarK5BMG9hAnbAzvCQT1IJ9g"
   debug: false
   webhook:
     enabled: false

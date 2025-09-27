@@ -53,10 +53,10 @@ func (r *Reminder) IsDaily() bool {
 
 // IsWeekly 检查是否为每周提醒
 func (r *Reminder) IsWeekly() bool {
-	return len(r.SchedulePattern) > 7 && r.SchedulePattern[:7] == string(SchedulePatternWeekly)
+	return len(r.SchedulePattern) > 7 && r.SchedulePattern[:7] == "weekly:"
 }
 
 // IsOnce 检查是否为一次性提醒
 func (r *Reminder) IsOnce() bool {
-	return len(r.SchedulePattern) > 5 && r.SchedulePattern[:4] == string(SchedulePatternOnce)
+	return len(r.SchedulePattern) > 5 && r.SchedulePattern[:5] == "once:"
 }

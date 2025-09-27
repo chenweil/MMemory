@@ -1,0 +1,67 @@
+version: '3.8'
+
+services:
+  mmemory:
+    build: .
+    container_name: mmemory-bot
+    restart: unless-stopped
+    environment:
+      # Telegram Bot Token (必须设置)
+      - TELEGRAM_BOT_TOKEN=${TELEGRAM_BOT_TOKEN}
+      
+      # 数据库配置
+      - DATABASE_PATH=/app/data/mmemory.db
+      
+      # 应用配置
+      - ENVIRONMENT=production
+      - LOG_LEVEL=info
+      - LOG_FORMAT=json
+      
+      # 时区设置
+      - TZ=Asia/Shanghai
+    volumes:
+      # 持久化数据库文件
+      - ./data:/app/data
+      
+      # 可选：挂载自定义配置文件
+      # - ./configs/config.yaml:/app/configs/config.yaml:ro
+    networks:
+      - mmemory-network
+    healthcheck:
+      test: ["CMD", "ps", "aux", "|", "grep", "mmemory", "|", "grep", "-v", "grep"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 10s
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+networks:
+  mmemory-network:
+    driver: bridge
+
+# 如果需要使用外部PostgreSQL数据库（可选）
+# services:
+#   postgres:
+#     image: postgres:15-alpine
+#     container_name: mmemory-db
+#     restart: unless-stopped
+#     environment:
+#       - POSTGRES_DB=mmemory
+#       - POSTGRES_USER=mmemory
+#       - POSTGRES_PASSWORD=${POSTGRES_PASSWORD}
+#     volumes:
+#       - postgres_data:/var/lib/postgresql/data
+#     networks:
+#       - mmemory-network
+#     healthcheck:
+#       test: ["CMD-SHELL", "pg_isready -U mmemory"]
+#       interval: 30s
+#       timeout: 10s
+#       retries: 5
+
+# volumes:
+#   postgres_data:

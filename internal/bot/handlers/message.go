@@ -3,6 +3,7 @@ package handlers
 import (
 	"context"
 	"fmt"
+	"strings"
 
 	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api/v5"
 
@@ -12,14 +13,16 @@ import (
 )
 
 type MessageHandler struct {
-	reminderService service.ReminderService
-	userService     service.UserService
+	reminderService    service.ReminderService
+	userService        service.UserService
+	reminderLogService service.ReminderLogService
 }
 
-func NewMessageHandler(reminderService service.ReminderService, userService service.UserService) *MessageHandler {
+func NewMessageHandler(reminderService service.ReminderService, userService service.UserService, reminderLogService service.ReminderLogService) *MessageHandler {
 	return &MessageHandler{
-		reminderService: reminderService,
-		userService:     userService,
+		reminderService:    reminderService,
+		userService:        userService,
+		reminderLogService: reminderLogService,
 	}
 }
 
@@ -47,6 +50,8 @@ func (h *MessageHandler) handleCommand(ctx context.Context, bot *tgbotapi.BotAPI
 		return h.handleHelpCommand(bot, message)
 	case "list":
 		return h.handleListCommand(ctx, bot, message, user)
+	case "stats":
+		return h.handleStatsCommand(ctx, bot, message, user)
 	default:
 		return h.sendMessage(bot, message.Chat.ID, "未知命令，请输入 /help 查看帮助")
 	}
@@ -84,6 +89,7 @@ func (h *MessageHandler) handleHelpCommand(bot *tgbotapi.BotAPI, message *tgbota
 🔹 其他命令：
 • /start - 重新开始
 • /help - 查看帮助
+• /stats - 查看统计数据
 
 💡 直接发送文字消息即可创建提醒，我会智能识别你的需求！`
 
@@ -91,8 +97,102 @@ func (h *MessageHandler) handleHelpCommand(bot *tgbotapi.BotAPI, message *tgbota
 }
 
 func (h *MessageHandler) handleListCommand(ctx context.Context, bot *tgbotapi.BotAPI, message *tgbotapi.Message, user *models.User) error {
-	// TODO: 实现提醒列表显示
-	return h.sendMessage(bot, message.Chat.ID, "📋 提醒列表功能开发中...")
+	reminders, err := h.reminderService.GetUserReminders(ctx, user.ID)
+	if err != nil {
+		logger.Errorf("获取用户提醒列表失败: %v", err)
+		return h.sendErrorMessage(bot, message.Chat.ID, "获取提醒列表失败，请稍后重试")
+	}
+
+	if len(reminders) == 0 {
+		return h.sendMessage(bot, message.Chat.ID, "📋 你还没有设置任何提醒\n\n💡 试试对我说：\"每天19点提醒我复盘工作\"")
+	}
+
+	// 构建提醒列表消息
+	listText := "📋 <b>你的提醒列表</b>\n\n"
+	
+	activeCount := 0
+	for _, reminder := range reminders {
+		if !reminder.IsActive {
+			continue
+		}
+		
+		activeCount++
+		// 提醒类型图标
+		typeIcon := "🔔"
+		if reminder.Type == models.ReminderTypeHabit {
+			typeIcon = "🔄"
+		} else if reminder.Type == models.ReminderTypeTask {
+			typeIcon = "📋"
+		}
+		
+		// 状态图标
+		statusIcon := "✅"
+		statusText := "活跃中"
+		
+		listText += fmt.Sprintf("<b>%d.</b> %s <i>%s</i>\n", activeCount, typeIcon, reminder.Title)
+		listText += fmt.Sprintf("    ⏰ %s\n", h.formatSchedule(reminder))
+		listText += fmt.Sprintf("    📊 %s %s\n\n", statusIcon, statusText)
+	}
+	
+	if activeCount == 0 {
+		return h.sendMessage(bot, message.Chat.ID, "📋 你目前没有活跃的提醒\n\n💡 试试对我说：\"每天19点提醒我复盘工作\"")
+	}
+	
+	listText += fmt.Sprintf("🔢 共有 <b>%d</b> 个活跃提醒\n", activeCount)
+	listText += "\n💡 <i>回复提醒消息时可以选择完成、延期或跳过</i>"
+
+	return h.sendMessage(bot, message.Chat.ID, listText)
+}
+
+func (h *MessageHandler) handleStatsCommand(ctx context.Context, bot *tgbotapi.BotAPI, message *tgbotapi.Message, user *models.User) error {
+	stats, err := h.reminderLogService.GetUserStatistics(ctx, user.ID)
+	if err != nil {
+		logger.Errorf("获取用户统计数据失败: %v", err)
+		return h.sendErrorMessage(bot, message.Chat.ID, "获取统计数据失败，请稍后重试")
+	}
+
+	statsText := "📊 <b>你的使用统计</b>\n\n"
+	
+	// 基础统计
+	statsText += fmt.Sprintf("📝 <b>提醒总数:</b> %d 个\n", stats.TotalReminders)
+	statsText += fmt.Sprintf("✅ <b>活跃提醒:</b> %d 个\n\n", stats.ActiveReminders)
+	
+	// 今日统计
+	statsText += "📅 <b>今日数据:</b>\n"
+	statsText += fmt.Sprintf("  ✅ 完成: %d 个\n", stats.CompletedToday)
+	statsText += fmt.Sprintf("  😴 跳过: %d 个\n\n", stats.SkippedToday)
+	
+	// 本周统计
+	statsText += "📆 <b>本周数据:</b>\n"
+	statsText += fmt.Sprintf("  ✅ 完成: %d 个\n\n", stats.CompletedWeek)
+	
+	// 本月统计
+	statsText += "📈 <b>本月数据:</b>\n"
+	statsText += fmt.Sprintf("  ✅ 完成: %d 个\n", stats.CompletedMonth)
+	
+	// 完成率
+	if stats.CompletionRate > 0 {
+		rateEmoji := "📊"
+		if stats.CompletionRate >= 80 {
+			rateEmoji = "🎉"
+		} else if stats.CompletionRate >= 60 {
+			rateEmoji = "👍"
+		}
+		statsText += fmt.Sprintf("  %s 完成率: %d%%\n\n", rateEmoji, stats.CompletionRate)
+	} else {
+		statsText += "  📊 完成率: 暂无数据\n\n"
+	}
+	
+	// 鼓励信息
+	if stats.CompletedToday > 0 {
+		statsText += "🌟 <i>今天做得很棒！继续保持！</i>"
+	} else if stats.ActiveReminders > 0 {
+		statsText += "💪 <i>今天还有提醒等着你完成哦～</i>"
+	} else {
+		statsText += "🚀 <i>快去设置一些提醒开始你的习惯养成之旅吧！</i>"
+	}
+
+	return h.sendMessage(bot, message.Chat.ID, statsText)
 }
 
 func (h *MessageHandler) handleTextMessage(ctx context.Context, bot *tgbotapi.BotAPI, message *tgbotapi.Message, user *models.User) error {
@@ -146,8 +246,34 @@ func (h *MessageHandler) formatSchedule(reminder *models.Reminder) string {
 	case reminder.IsDaily():
 		return fmt.Sprintf("每天 %s", reminder.TargetTime[:5])
 	case reminder.IsWeekly():
+		// 解析周几
+		weekdayMap := map[string]string{
+			"1": "周一", "2": "周二", "3": "周三", "4": "周四", 
+			"5": "周五", "6": "周六", "7": "周日",
+		}
+		
+		pattern := reminder.SchedulePattern
+		if len(pattern) > 7 && pattern[:7] == "weekly:" {
+			weekdaysStr := pattern[7:]
+			weekdays := []string{}
+			for _, day := range strings.Split(weekdaysStr, ",") {
+				day = strings.TrimSpace(day)
+				if dayName, ok := weekdayMap[day]; ok {
+					weekdays = append(weekdays, dayName)
+				}
+			}
+			if len(weekdays) > 0 {
+				return fmt.Sprintf("%s %s", strings.Join(weekdays, "、"), reminder.TargetTime[:5])
+			}
+		}
 		return fmt.Sprintf("每周指定时间 %s", reminder.TargetTime[:5])
 	case reminder.IsOnce():
+		// 解析日期
+		pattern := reminder.SchedulePattern
+		if len(pattern) > 5 && pattern[:5] == "once:" {
+			dateStr := pattern[5:]
+			return fmt.Sprintf("%s %s", dateStr, reminder.TargetTime[:5])
+		}
 		return fmt.Sprintf("一次性提醒 %s", reminder.TargetTime[:5])
 	default:
 		return reminder.SchedulePattern

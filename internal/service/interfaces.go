@@ -2,8 +2,22 @@ package service
 
 import (
 	"context"
+	"time"
 	"mmemory/internal/models"
 )
+
+// UserStatistics 用户统计数据
+type UserStatistics struct {
+	TotalReminders    int `json:"total_reminders"`    // 总提醒数
+	ActiveReminders   int `json:"active_reminders"`   // 活跃提醒数
+	CompletedToday    int `json:"completed_today"`    // 今日完成数
+	CompletedWeek     int `json:"completed_week"`     // 本周完成数
+	CompletedMonth    int `json:"completed_month"`    // 本月完成数
+	SkippedToday      int `json:"skipped_today"`      // 今日跳过数
+	CompletionRate    int `json:"completion_rate"`    // 完成率 (百分比)
+	LongestStreak     int `json:"longest_streak"`     // 最长连续完成天数
+	CurrentStreak     int `json:"current_streak"`     // 当前连续完成天数
+}
 
 // UserService 用户服务接口
 type UserService interface {
@@ -20,6 +34,17 @@ type ReminderService interface {
 	GetUserReminders(ctx context.Context, userID uint) ([]*models.Reminder, error)
 	UpdateReminder(ctx context.Context, reminder *models.Reminder) error
 	DeleteReminder(ctx context.Context, id uint) error
+}
+
+// ReminderLogService 提醒记录服务接口
+type ReminderLogService interface {
+	GetByID(ctx context.Context, id uint) (*models.ReminderLog, error)
+	MarkAsCompleted(ctx context.Context, id uint, response string) error
+	MarkAsSkipped(ctx context.Context, id uint, response string) error
+	CreateDelayReminder(ctx context.Context, originalLogID uint, delayTime time.Time, hours int) error
+	GetOverdueReminders(ctx context.Context) ([]*models.ReminderLog, error)
+	UpdateFollowUpCount(ctx context.Context, id uint) error
+	GetUserStatistics(ctx context.Context, userID uint) (*UserStatistics, error)
 }
 
 // SchedulerService 调度服务接口

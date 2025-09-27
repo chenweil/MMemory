@@ -24,7 +24,10 @@ func (r *reminderLogRepository) Create(ctx context.Context, log *models.Reminder
 
 func (r *reminderLogRepository) GetByID(ctx context.Context, id uint) (*models.ReminderLog, error) {
 	var log models.ReminderLog
-	err := r.db.WithContext(ctx).Preload("Reminder").First(&log, id).Error
+	err := r.db.WithContext(ctx).
+		Preload("Reminder").
+		Preload("Reminder.User").
+		First(&log, id).Error
 	if err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
 			return nil, nil
@@ -54,7 +57,7 @@ func (r *reminderLogRepository) GetPendingLogs(ctx context.Context) ([]*models.R
 	err := r.db.WithContext(ctx).
 		Preload("Reminder").
 		Preload("Reminder.User").
-		Where("status = ?", models.ReminderStatusPending).
+		Where("status IN ?", []models.ReminderStatus{models.ReminderStatusPending, models.ReminderStatusSent}).
 		Find(&logs).Error
 	return logs, err
 }
