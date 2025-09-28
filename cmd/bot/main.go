@@ -2,14 +2,17 @@ package main
 
 import (
 	"context"
+	"fmt"
 	"log"
 	"os"
 	"os/signal"
+	"strings"
 	"syscall"
 	"time"
 
 	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api/v5"
 
+	"mmemory/internal/bot"
 	"mmemory/internal/bot/handlers"
 	"mmemory/internal/repository/sqlite"
 	"mmemory/internal/service"
@@ -45,13 +48,12 @@ func main() {
 	reminderRepo := sqlite.NewReminderRepository(database.GetDB())
 	reminderLogRepo := sqlite.NewReminderLogRepository(database.GetDB())
 
-	// 初始化Telegram Bot
-	bot, err := tgbotapi.NewBotAPI(cfg.Bot.Token)
+	// 初始化Telegram Bot（使用自定义HTTP客户端）
+	bot, err := bot.NewBotWithCustomClient(cfg.Bot.Token, cfg.Bot.Debug)
 	if err != nil {
 		logger.Fatalf("创建Telegram Bot失败: %v", err)
 	}
 
-	bot.Debug = cfg.Bot.Debug
 	logger.Infof("✅ Telegram Bot 授权成功: @%s", bot.Self.UserName)
 
 	// 初始化服务层
@@ -62,7 +64,9 @@ func main() {
 	schedulerService := service.NewSchedulerService(reminderRepo, reminderLogRepo, notificationService)
 
 	// 建立服务之间的依赖关系
-	reminderService.SetScheduler(schedulerService)
+	if reminderServiceWithScheduler, ok := reminderService.(interface{ SetScheduler(service.SchedulerService) }); ok {
+		reminderServiceWithScheduler.SetScheduler(schedulerService)
+	}
 
 	// 初始化消息处理器
 	messageHandler := handlers.NewMessageHandler(reminderService, userService, reminderLogService)
@@ -98,27 +102,84 @@ func main() {
 	logger.Info("👋 程序已退出")
 }
 
+// isEOFError 检查是否为EOF相关错误
+func isEOFError(err error) bool {
+	if err == nil {
+		return false
+	}
+	errStr := err.Error()
+	return strings.Contains(errStr, "EOF") || 
+		strings.Contains(errStr, "unexpected EOF") ||
+		strings.Contains(errStr, "connection reset") ||
+		strings.Contains(errStr, "broken pipe")
+}
+
+// logTelegramError 记录Telegram相关错误，区分错误类型
+func logTelegramError(err error, operation string) {
+	if isEOFError(err) {
+		logger.Warnf("Telegram API 连接错误 [%s]: %v (类型: EOF错误/网络中断)", operation, err)
+	} else {
+		logger.Errorf("Telegram API 错误 [%s]: %v (类型: %T)", operation, err, err)
+	}
+}
+
 func startBot(ctx context.Context, bot *tgbotapi.BotAPI, messageHandler *handlers.MessageHandler, callbackHandler *handlers.CallbackHandler) error {
 	logger.Info("🤖 Bot开始接收消息...")
 
-	u := tgbotapi.NewUpdate(0)
-	u.Timeout = 60
-
-	updates := bot.GetUpdatesChan(u)
-
+	maxRetries := 3
+	retryDelay := 5 * time.Second
+	
 	for {
 		select {
 		case <-ctx.Done():
 			logger.Info("停止接收消息")
 			bot.StopReceivingUpdates()
 			return nil
+			
+		default:
+			if err := runUpdatesWithRetry(ctx, bot, messageHandler, callbackHandler, maxRetries, retryDelay); err != nil {
+				logger.Errorf("Bot运行失败，即将重试: %v", err)
+				time.Sleep(retryDelay)
+				continue
+			}
+		}
+	}
+}
 
-		case update := <-updates:
+func runUpdatesWithRetry(ctx context.Context, bot *tgbotapi.BotAPI, messageHandler *handlers.MessageHandler, callbackHandler *handlers.CallbackHandler, maxRetries int, retryDelay time.Duration) error {
+	u := tgbotapi.NewUpdate(0)
+	u.Timeout = 30 // 减少超时时间到30秒，降低网络中断风险
+
+	// 获取更新通道 (GetUpdatesChan 不返回错误，只返回通道)
+	updates := bot.GetUpdatesChan(u)
+
+	// 处理更新
+	return processUpdates(ctx, updates, bot, messageHandler, callbackHandler)
+}
+
+func processUpdates(ctx context.Context, updates tgbotapi.UpdatesChannel, bot *tgbotapi.BotAPI, messageHandler *handlers.MessageHandler, callbackHandler *handlers.CallbackHandler) error {
+	consecutiveErrors := 0
+	maxConsecutiveErrors := 10
+	
+	for {
+		select {
+		case <-ctx.Done():
+			logger.Info("停止接收消息")
+			return nil
+
+		case update, ok := <-updates:
+			if !ok {
+				return fmt.Errorf("更新通道已关闭")
+			}
+			
+			// 重置连续错误计数
+			consecutiveErrors = 0
+			
 			// 处理消息
 			if update.Message != nil {
 				go func(msg *tgbotapi.Message) {
 					if err := messageHandler.HandleMessage(ctx, bot, msg); err != nil {
-						logger.Errorf("处理消息失败: %v", err)
+						logTelegramError(err, "处理消息")
 					}
 				}(update.Message)
 			}
@@ -127,9 +188,19 @@ func startBot(ctx context.Context, bot *tgbotapi.BotAPI, messageHandler *handler
 			if update.CallbackQuery != nil {
 				go func(callback *tgbotapi.CallbackQuery) {
 					if err := callbackHandler.HandleCallback(ctx, bot, callback); err != nil {
-						logger.Errorf("处理回调失败: %v", err)
+						logTelegramError(err, "处理回调")
 					}
 				}(update.CallbackQuery)
+			}
+			
+		case <-time.After(5 * time.Minute):
+			// 5分钟内没有收到任何更新，记录心跳日志
+			logger.Debug("🫀 Bot心跳检测：运行正常，暂无新消息")
+			consecutiveErrors++
+			
+			if consecutiveErrors > maxConsecutiveErrors {
+				logger.Warn("连续多次没有收到更新，可能存在连接问题")
+				return fmt.Errorf("连接可能存在问题，需要重新初始化")
 			}
 		}
 	}

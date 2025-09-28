@@ -6,7 +6,10 @@
       "Bash(go mod:*)",
       "Bash(git add:*)",
       "Bash(go build:*)",
-      "Bash(go test:*)"
+      "Bash(go test:*)",
+      "Bash(go get:*)",
+      "Bash(chmod:*)",
+      "Bash(docker build:*)"
     ],
     "deny": [],
     "ask": []
