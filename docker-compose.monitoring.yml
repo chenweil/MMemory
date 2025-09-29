@@ -1,0 +1,122 @@
+version: '3.8'
+
+services:
+  # MMemory Bot应用
+  mmemory:
+    build: .
+    container_name: mmemory-bot
+    restart: unless-stopped
+    environment:
+      - MMEMORY_BOT_TOKEN=${BOT_TOKEN}
+      - MMEMORY_MONITORING_ENABLED=true
+      - MMEMORY_MONITORING_PORT=9090
+    ports:
+      - "9090:9090"  # 监控指标端口
+    volumes:
+      - ./data:/app/data
+    networks:
+      - mmemory-network
+    depends_on:
+      - prometheus
+      - grafana
+
+  # Prometheus监控
+  prometheus:
+    image: prom/prometheus:latest
+    container_name: mmemory-prometheus
+    restart: unless-stopped
+    command:
+      - '--config.file=/etc/prometheus/prometheus.yml'
+      - '--storage.tsdb.path=/prometheus'
+      - '--web.console.libraries=/etc/prometheus/console_libraries'
+      - '--web.console.templates=/etc/prometheus/consoles'
+      - '--storage.tsdb.retention.time=200h'
+      - '--web.enable-lifecycle'
+    volumes:
+      - ./configs/prometheus.yml:/etc/prometheus/prometheus.yml
+      - ./configs/alerts:/etc/prometheus/alerts
+      - prometheus_data:/prometheus
+    ports:
+      - "9091:9090"
+    networks:
+      - mmemory-network
+
+  # Grafana可视化
+  grafana:
+    image: grafana/grafana:latest
+    container_name: mmemory-grafana
+    restart: unless-stopped
+    environment:
+      - GF_SECURITY_ADMIN_USER=admin
+      - GF_SECURITY_ADMIN_PASSWORD=admin123
+      - GF_USERS_ALLOW_SIGN_UP=false
+    volumes:
+      - grafana_data:/var/lib/grafana
+      - ./configs/grafana:/etc/grafana/provisioning/dashboards
+    ports:
+      - "3000:3000"
+    networks:
+      - mmemory-network
+    depends_on:
+      - prometheus
+
+  # Node Exporter系统监控
+  node-exporter:
+    image: prom/node-exporter:latest
+    container_name: mmemory-node-exporter
+    restart: unless-stopped
+    command:
+      - '--path.rootfs=/host'
+      - '--path.procfs=/host/proc'
+      - '--path.sysfs=/host/sys'
+      - '--collector.filesystem.mount-points-exclude=^/(sys|proc|dev|host|etc)($$|/)'
+    volumes:
+      - /proc:/host/proc:ro
+      - /sys:/host/sys:ro
+      - /:/rootfs:ro
+    ports:
+      - "9100:9100"
+    networks:
+      - mmemory-network
+
+  # AlertManager告警管理
+  alertmanager:
+    image: prom/alertmanager:latest
+    container_name: mmemory-alertmanager
+    restart: unless-stopped
+    command:
+      - '--config.file=/etc/alertmanager/config.yml'
+      - '--storage.path=/alertmanager'
+    volumes:
+      - ./configs/alertmanager.yml:/etc/alertmanager/config.yml
+      - alertmanager_data:/alertmanager
+    ports:
+      - "9093:9093"
+    networks:
+      - mmemory-network
+
+  # Blackbox Exporter外部服务监控
+  blackbox-exporter:
+    image: prom/blackbox-exporter:latest
+    container_name: mmemory-blackbox-exporter
+    restart: unless-stopped
+    command:
+      - '--config.file=/config/blackbox.yml'
+    volumes:
+      - ./configs/blackbox.yml:/config/blackbox.yml
+    ports:
+      - "9115:9115"
+    networks:
+      - mmemory-network
+
+networks:
+  mmemory-network:
+    driver: bridge
+
+volumes:
+  prometheus_data:
+    driver: local
+  grafana_data:
+    driver: local
+  alertmanager_data:
+    driver: local
