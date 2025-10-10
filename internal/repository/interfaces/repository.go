@@ -12,6 +12,7 @@ type UserRepository interface {
 	GetByID(ctx context.Context, id uint) (*models.User, error)
 	Update(ctx context.Context, user *models.User) error
 	Delete(ctx context.Context, id uint) error
+	Count(ctx context.Context) (int64, error)
 }
 
 // ReminderRepository 提醒仓储接口
@@ -22,6 +23,7 @@ type ReminderRepository interface {
 	GetActiveReminders(ctx context.Context) ([]*models.Reminder, error)
 	Update(ctx context.Context, reminder *models.Reminder) error
 	Delete(ctx context.Context, id uint) error
+	CountByStatus(ctx context.Context, status models.ReminderStatStatus) (int64, error)
 }
 
 // ReminderLogRepository 提醒记录仓储接口

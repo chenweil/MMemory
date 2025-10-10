@@ -16,6 +16,10 @@ Thumbs.db
 # 忽略 Go 构建文件
 /bin/
 /dist/
+bot
+mmemory
+coverage.out
+coverage.html
 
 # 忽略数据库文件
 /data/*.db
@@ -34,3 +38,4 @@ Thumbs.db
 
 # 忽略 Claude IDE 配置文件
 .claude/
+*.bak

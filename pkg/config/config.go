@@ -21,6 +21,7 @@ type Config struct {
 	Logging   LoggingConfig   `mapstructure:"logging"`
 	App       AppConfig       `mapstructure:"app"`
 	Monitoring MonitoringConfig `mapstructure:"monitoring"`
+	AI        AIConfig        `mapstructure:"ai"`
 }
 
 type BotConfig struct {
@@ -69,6 +70,28 @@ type MonitoringConfig struct {
 	Enabled bool   `mapstructure:"enabled"`
 	Port    int    `mapstructure:"port"`
 	Path    string `mapstructure:"path"`
+}
+
+type AIConfig struct {
+	Enabled bool           `mapstructure:"enabled"`
+	OpenAI  OpenAIConfig   `mapstructure:"openai"`
+	Prompts PromptsConfig  `mapstructure:"prompts"`
+}
+
+type OpenAIConfig struct {
+	APIKey       string        `mapstructure:"api_key"`
+	BaseURL      string        `mapstructure:"base_url"`
+	PrimaryModel string        `mapstructure:"primary_model"`
+	BackupModel  string        `mapstructure:"backup_model"`
+	Temperature  float32       `mapstructure:"temperature"`
+	MaxTokens    int           `mapstructure:"max_tokens"`
+	Timeout      time.Duration `mapstructure:"timeout"`
+	MaxRetries   int           `mapstructure:"max_retries"`
+}
+
+type PromptsConfig struct {
+	ReminderParse string `mapstructure:"reminder_parse"`
+	ChatResponse  string `mapstructure:"chat_response"`
 }
 
 // ConfigWatcher 配置监听器接口
@@ -210,6 +233,16 @@ func (cm *ConfigManager) setDefaults() {
 	cm.viper.SetDefault("monitoring.enabled", true)
 	cm.viper.SetDefault("monitoring.port", 9090)
 	cm.viper.SetDefault("monitoring.path", "/metrics")
+	
+	// AI配置默认值
+	cm.viper.SetDefault("ai.enabled", false)
+	cm.viper.SetDefault("ai.openai.base_url", "https://api.openai.com/v1")
+	cm.viper.SetDefault("ai.openai.primary_model", "gpt-4o-mini")
+	cm.viper.SetDefault("ai.openai.backup_model", "gpt-3.5-turbo")
+	cm.viper.SetDefault("ai.openai.temperature", 0.1)
+	cm.viper.SetDefault("ai.openai.max_tokens", 1000)
+	cm.viper.SetDefault("ai.openai.timeout", "30s")
+	cm.viper.SetDefault("ai.openai.max_retries", 3)
 }
 
 // GetConfig 获取当前配置

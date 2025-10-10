@@ -1,6 +1,9 @@
-# MMemory 配置文件示例
+# MMemory 配置文件示例 - 包含AI功能
 # 这是一个完整的配置文件示例，展示了所有可用的配置选项
 # 你可以根据实际需求进行修改
+# 
+# 版本: v1.1 (添加了AI配置支持)
+# 更新日期: 2025年9月29日
 
 # Telegram Bot 配置
 bot:
@@ -85,3 +88,62 @@ monitoring:
   
   # 监控路径 - 可选，默认 "/metrics"
   path: "/metrics"
+
+# AI配置 (新增)
+ai:
+  # 是否启用AI功能 - 默认 false，需要手动启用
+  enabled: false
+  
+  # OpenAI配置
+  openai:
+    # API密钥 - 必需 (当enabled=true时)
+    # 可以通过环境变量 MMEMORY_AI_OPENAI_API_KEY 设置
+    api_key: "${OPENAI_API_KEY}"
+    
+    # API基础URL - 可选，默认 "https://api.openai.com/v1"
+    base_url: "https://api.openai.com/v1"
+    
+    # 主要模型 - 可选，默认 "gpt-4o-mini"
+    primary_model: "gpt-4o-mini"
+    
+    # 备用模型 - 可选，默认 "gpt-3.5-turbo"
+    backup_model: "gpt-3.5-turbo"
+    
+    # 温度参数 - 可选，默认 0.1 (较低的随机性)
+    temperature: 0.1
+    
+    # 最大token数 - 可选，默认 1000
+    max_tokens: 1000
+    
+    # 请求超时 - 可选，默认 30s
+    timeout: 30s
+    
+    # 最大重试次数 - 可选，默认 3
+    max_retries: 3
+  
+  # Prompt模板配置 (可选，使用内置默认模板)
+  prompts:
+    # 提醒解析Prompt模板
+    reminder_parse: |
+      你是MMemory的智能助手。请分析用户消息，识别意图并返回JSON格式结果。
+      
+      当前时间: {{.CurrentTime}}
+      用户消息: "{{.Message}}"
+      {{if .ConversationHistory}}对话历史: {{.ConversationHistory}}{{end}}
+      
+      支持的功能:
+      1. 创建提醒 - 用户想要设置提醒、待办、日程
+      2. 普通对话 - 用户想要聊天、询问信息
+      3. 查询总结 - 用户想要查看或总结某些内容
+      
+      请返回JSON格式结果，包含intent、confidence、reminder或chat_response等字段。
+    
+    # 聊天回复Prompt模板  
+    chat_response: |
+      你是MMemory智能助手。用户正在与你对话。请自然、友好地回应。
+      如果用户提到书籍、电影等，可以简单介绍。保持回复简洁（50字以内）。
+      
+      {{if .ConversationHistory}}对话历史: {{.ConversationHistory}}{{end}}
+      用户消息: "{{.Message}}"
+      
+      请直接回复，不需要JSON格式。

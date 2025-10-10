@@ -64,6 +64,17 @@ func (m *mockReminderRepository) Delete(ctx context.Context, id uint) error {
 	return nil
 }
 
+func (m *mockReminderRepository) CountByStatus(ctx context.Context, status models.ReminderStatStatus) (int64, error) {
+	var count int64
+	for _, reminder := range m.reminders {
+		// 简化实现，实际应该根据状态统计
+		if reminder.IsActive && status == models.ReminderStatStatusActive {
+			count++
+		}
+	}
+	return count, nil
+}
+
 func TestReminderService_CreateReminder(t *testing.T) {
 	mockRepo := newMockReminderRepository()
 	reminderService := NewReminderService(mockRepo)

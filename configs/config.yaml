@@ -30,3 +30,50 @@ app:
   name: "MMemory"
   version: "v0.0.1"
   environment: "development"  # development, production
+
+# 监控配置
+monitoring:
+  # 是否启用监控 - 可选，默认 true
+  enabled: true
+
+  # 监控端口 - 可选，默认 9090
+  port: 9090
+
+  # 监控路径 - 可选，默认 "/metrics"
+  path: "/metrics"
+
+# AI配置
+ai:
+  # 是否启用AI功能 - 从环境变量 MMEMORY_AI_ENABLED 读取
+  enabled: false
+
+  # OpenAI配置
+  openai:
+    # API Key - 从环境变量 MMEMORY_AI_OPENAI_API_KEY 读取
+    api_key: ""
+
+    # API Base URL - 从环境变量 MMEMORY_AI_OPENAI_BASE_URL 读取
+    base_url: "https://api.openai.com/v1"
+
+    # 主要模型 - 从环境变量 MMEMORY_AI_OPENAI_PRIMARY_MODEL 读取
+    primary_model: "gpt-4o-mini"
+
+    # 备用模型 - 从环境变量 MMEMORY_AI_OPENAI_BACKUP_MODEL 读取
+    backup_model: "gpt-3.5-turbo"
+
+    # Temperature参数
+    temperature: 0.1
+
+    # 最大Token数
+    max_tokens: 1000
+
+    # 请求超时
+    timeout: "30s"
+
+    # 最大重试次数
+    max_retries: 3
+
+  # Prompt模板配置（使用默认值）
+  prompts:
+    reminder_parse: ""
+    chat_response: ""

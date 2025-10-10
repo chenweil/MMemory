@@ -4,11 +4,13 @@ import (
 	"context"
 	"fmt"
 	"strings"
+	"time"
 
 	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api/v5"
 
 	"mmemory/internal/models"
 	"mmemory/internal/service"
+	"mmemory/pkg/ai"
 	"mmemory/pkg/logger"
 )
 
@@ -16,13 +18,25 @@ type MessageHandler struct {
 	reminderService    service.ReminderService
 	userService        service.UserService
 	reminderLogService service.ReminderLogService
+
+	// AI服务（可选，用于智能解析和对话）
+	aiParserService    service.AIParserService
+	conversationService service.ConversationService
 }
 
-func NewMessageHandler(reminderService service.ReminderService, userService service.UserService, reminderLogService service.ReminderLogService) *MessageHandler {
+func NewMessageHandler(
+	reminderService service.ReminderService,
+	userService service.UserService,
+	reminderLogService service.ReminderLogService,
+	aiParserService service.AIParserService,
+	conversationService service.ConversationService,
+) *MessageHandler {
 	return &MessageHandler{
-		reminderService:    reminderService,
-		userService:        userService,
-		reminderLogService: reminderLogService,
+		reminderService:     reminderService,
+		userService:         userService,
+		reminderLogService:  reminderLogService,
+		aiParserService:     aiParserService,
+		conversationService: conversationService,
 	}
 }
 
@@ -196,6 +210,57 @@ func (h *MessageHandler) handleStatsCommand(ctx context.Context, bot *tgbotapi.B
 }
 
 func (h *MessageHandler) handleTextMessage(ctx context.Context, bot *tgbotapi.BotAPI, message *tgbotapi.Message, user *models.User) error {
+	// 如果启用了AI服务，优先使用AI解析
+	if h.aiParserService != nil {
+		logger.Infof("使用AI解析器处理用户 %d 的消息", user.ID)
+		return h.handleWithAI(ctx, bot, message, user)
+	}
+
+	// 降级到传统解析器
+	logger.Infof("使用传统解析器处理用户 %d 的消息", user.ID)
+	return h.handleWithLegacyParser(ctx, bot, message, user)
+}
+
+// handleWithAI 使用AI解析器处理消息
+func (h *MessageHandler) handleWithAI(ctx context.Context, bot *tgbotapi.BotAPI, message *tgbotapi.Message, user *models.User) error {
+	// 调用AI解析服务
+	userIDStr := fmt.Sprintf("%d", user.TelegramID)
+	parseResult, err := h.aiParserService.ParseMessage(ctx, userIDStr, message.Text)
+	if err != nil {
+		logger.Errorf("AI解析失败，降级到传统解析器: %v", err)
+		return h.handleWithLegacyParser(ctx, bot, message, user)
+	}
+
+	// 验证解析结果
+	validation := parseResult.Validate()
+	if !validation.IsValid {
+		logger.Warnf("AI解析结果验证失败: %v，降级到传统解析器", validation.Errors)
+		return h.handleWithLegacyParser(ctx, bot, message, user)
+	}
+
+	logger.Infof("AI解析成功 - Intent: %s, Confidence: %.2f, ParsedBy: %s",
+		parseResult.Intent, parseResult.Confidence, parseResult.ParsedBy)
+
+	// 根据意图路由到不同的处理器
+	switch parseResult.Intent {
+	case ai.IntentReminder:
+		return h.handleReminderIntent(ctx, bot, message, user, parseResult)
+	case ai.IntentChat:
+		return h.handleChatIntent(ctx, bot, message, user, parseResult)
+	case ai.IntentSummary:
+		return h.handleSummaryIntent(ctx, bot, message, user, parseResult)
+	case ai.IntentQuery:
+		return h.handleQueryIntent(ctx, bot, message, user, parseResult)
+	case ai.IntentUnknown:
+		return h.sendMessage(bot, message.Chat.ID, "抱歉，我没有完全理解你的意思。\n\n💡 你可以：\n• 设置提醒：\"每天19点提醒我复盘工作\"\n• 查看列表：/list\n• 查看帮助：/help")
+	default:
+		logger.Warnf("未知的意图类型: %s", parseResult.Intent)
+		return h.sendMessage(bot, message.Chat.ID, "抱歉，我暂时无法处理这类请求。请尝试其他方式或查看 /help")
+	}
+}
+
+// handleWithLegacyParser 使用传统解析器处理消息
+func (h *MessageHandler) handleWithLegacyParser(ctx context.Context, bot *tgbotapi.BotAPI, message *tgbotapi.Message, user *models.User) error {
 	// 尝试解析提醒创建请求
 	reminder, err := h.reminderService.ParseReminderFromText(ctx, message.Text, user.ID)
 	if err != nil {
@@ -215,6 +280,168 @@ func (h *MessageHandler) handleTextMessage(ctx context.Context, bot *tgbotapi.Bo
 
 	successText := fmt.Sprintf("✅ 提醒已设置成功！\n\n📝 %s\n⏰ %s", reminder.Title, h.formatSchedule(reminder))
 	return h.sendMessage(bot, message.Chat.ID, successText)
+}
+
+// handleReminderIntent 处理提醒创建意图
+func (h *MessageHandler) handleReminderIntent(ctx context.Context, bot *tgbotapi.BotAPI, message *tgbotapi.Message, user *models.User, parseResult *ai.ParseResult) error {
+	if parseResult.Reminder == nil {
+		logger.Error("提醒意图但缺少提醒信息")
+		return h.sendErrorMessage(bot, message.Chat.ID, "抱歉，无法提取提醒信息，请重新描述")
+	}
+
+	reminderInfo := parseResult.Reminder
+
+	// 构造时间字符串 HH:MM:SS
+	targetTime := fmt.Sprintf("%02d:%02d:00", reminderInfo.Time.Hour, reminderInfo.Time.Minute)
+
+	// 创建提醒对象
+	reminder := &models.Reminder{
+		UserID:          user.ID,
+		Title:           reminderInfo.Title,
+		Description:     reminderInfo.Description,
+		Type:            reminderInfo.Type,
+		TargetTime:      targetTime,
+		SchedulePattern: string(reminderInfo.SchedulePattern),
+		IsActive:        true,
+		Timezone:        reminderInfo.Time.Timezone,
+	}
+
+	// 保存提醒
+	if err := h.reminderService.CreateReminder(ctx, reminder); err != nil {
+		logger.Errorf("创建提醒失败: %v", err)
+		return h.sendErrorMessage(bot, message.Chat.ID, "创建提醒失败，请稍后重试")
+	}
+
+	// 构造成功消息
+	successText := fmt.Sprintf("✅ 提醒已设置成功！\n\n📝 %s\n⏰ %s",
+		reminder.Title, h.formatSchedule(reminder))
+
+	// 如果置信度不是很高，添加提示
+	if parseResult.IsLowConfidence() {
+		successText += "\n\n💡 如果这不是你想要的，请告诉我更详细的信息。"
+	}
+
+	// 添加解析器信息（调试用）
+	if parseResult.ParsedBy != "" {
+		logger.Infof("提醒由 %s 解析", parseResult.ParsedBy)
+	}
+
+	return h.sendMessage(bot, message.Chat.ID, successText)
+}
+
+// handleChatIntent 处理对话意图
+func (h *MessageHandler) handleChatIntent(ctx context.Context, bot *tgbotapi.BotAPI, message *tgbotapi.Message, user *models.User, parseResult *ai.ParseResult) error {
+	if parseResult.ChatResponse == nil || parseResult.ChatResponse.Response == "" {
+		logger.Error("对话意图但缺少回复内容")
+		return h.sendMessage(bot, message.Chat.ID, "我在想怎么回答你...但好像有点卡住了 🤔\n\n试试问我其他问题？")
+	}
+
+	// 保存对话上下文（如果有ConversationService）
+	if h.conversationService != nil {
+		// 构造对话上下文数据
+		contextData := map[string]interface{}{
+			"last_message":  message.Text,
+			"last_response": parseResult.ChatResponse.Response,
+			"timestamp":     time.Now().Unix(),
+		}
+
+		// 尝试获取现有对话
+		conversation, err := h.conversationService.GetConversation(ctx, user.ID, models.ContextTypeChat)
+		if err != nil {
+			logger.Warnf("获取对话上下文失败: %v", err)
+		}
+
+		if conversation != nil {
+			// 更新现有对话
+			if err := h.conversationService.UpdateConversation(ctx, conversation, contextData); err != nil {
+				logger.Warnf("更新对话上下文失败: %v", err)
+			}
+		} else {
+			// 创建新对话（30天有效期）
+			_, err := h.conversationService.CreateConversation(ctx, user.ID, models.ContextTypeChat, contextData, 30*24*time.Hour)
+			if err != nil {
+				logger.Warnf("创建对话上下文失败: %v", err)
+			}
+		}
+	}
+
+	// 发送AI的回复
+	return h.sendMessage(bot, message.Chat.ID, parseResult.ChatResponse.Response)
+}
+
+// handleSummaryIntent 处理总结意图
+func (h *MessageHandler) handleSummaryIntent(ctx context.Context, bot *tgbotapi.BotAPI, message *tgbotapi.Message, user *models.User, parseResult *ai.ParseResult) error {
+	// 获取用户的提醒统计
+	stats, err := h.reminderLogService.GetUserStatistics(ctx, user.ID)
+	if err != nil {
+		logger.Errorf("获取用户统计失败: %v", err)
+		return h.sendErrorMessage(bot, message.Chat.ID, "获取统计数据失败，请稍后重试")
+	}
+
+	// 构造总结消息
+	summaryText := "📊 <b>你的使用总结</b>\n\n"
+	summaryText += fmt.Sprintf("📝 活跃提醒: %d 个\n", stats.ActiveReminders)
+	summaryText += fmt.Sprintf("✅ 本周完成: %d 个\n", stats.CompletedWeek)
+	summaryText += fmt.Sprintf("📈 本月完成: %d 个\n\n", stats.CompletedMonth)
+
+	if stats.CompletionRate > 0 {
+		summaryText += fmt.Sprintf("🎯 完成率: %d%%\n", stats.CompletionRate)
+	}
+
+	// 如果AI有额外的总结回复
+	if parseResult.ChatResponse != nil && parseResult.ChatResponse.Response != "" {
+		summaryText += "\n💬 " + parseResult.ChatResponse.Response
+	}
+
+	return h.sendMessage(bot, message.Chat.ID, summaryText)
+}
+
+// handleQueryIntent 处理查询意图
+func (h *MessageHandler) handleQueryIntent(ctx context.Context, bot *tgbotapi.BotAPI, message *tgbotapi.Message, user *models.User, parseResult *ai.ParseResult) error {
+	// 获取用户的提醒列表
+	reminders, err := h.reminderService.GetUserReminders(ctx, user.ID)
+	if err != nil {
+		logger.Errorf("获取提醒列表失败: %v", err)
+		return h.sendErrorMessage(bot, message.Chat.ID, "获取提醒列表失败，请稍后重试")
+	}
+
+	if len(reminders) == 0 {
+		return h.sendMessage(bot, message.Chat.ID, "📋 你还没有设置任何提醒\n\n💡 试试对我说：\"每天19点提醒我复盘工作\"")
+	}
+
+	// 构建提醒列表
+	listText := "📋 <b>你的提醒列表</b>\n\n"
+
+	activeCount := 0
+	for _, reminder := range reminders {
+		if !reminder.IsActive {
+			continue
+		}
+
+		activeCount++
+		typeIcon := "🔔"
+		if reminder.Type == models.ReminderTypeHabit {
+			typeIcon = "🔄"
+		} else if reminder.Type == models.ReminderTypeTask {
+			typeIcon = "📋"
+		}
+
+		listText += fmt.Sprintf("<b>%d.</b> %s <i>%s</i>\n", activeCount, typeIcon, reminder.Title)
+		listText += fmt.Sprintf("    ⏰ %s\n\n", h.formatSchedule(reminder))
+	}
+
+	if activeCount == 0 {
+		return h.sendMessage(bot, message.Chat.ID, "📋 你目前没有活跃的提醒")
+	}
+
+	listText += fmt.Sprintf("🔢 共有 <b>%d</b> 个活跃提醒", activeCount)
+
+	// 如果AI有额外的回复
+	if parseResult.ChatResponse != nil && parseResult.ChatResponse.Response != "" {
+		listText += "\n\n💬 " + parseResult.ChatResponse.Response
+	}
+
+	return h.sendMessage(bot, message.Chat.ID, listText)
 }
 
 func (h *MessageHandler) ensureUser(ctx context.Context, from *tgbotapi.User) (*models.User, error) {

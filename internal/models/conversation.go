@@ -11,6 +11,7 @@ const (
 	ContextTypeCreatingReminder   ContextType = "creating_reminder"   // 创建提醒中
 	ContextTypeRespondingReminder ContextType = "responding_reminder" // 回复提醒中
 	ContextTypeEditingReminder    ContextType = "editing_reminder"    // 编辑提醒中
+	ContextTypeChat               ContextType = "chat"                // AI对话
 )
 
 // Conversation 对话上下文模型

@@ -59,6 +59,10 @@ func (m *mockUserRepository) Delete(ctx context.Context, id uint) error {
 	return nil
 }
 
+func (m *mockUserRepository) Count(ctx context.Context) (int64, error) {
+	return int64(len(m.users)), nil
+}
+
 func TestUserService_CreateUser(t *testing.T) {
 	mockRepo := newMockUserRepository()
 	userService := NewUserService(mockRepo)

@@ -58,23 +58,33 @@ func Info(args ...interface{}) {
 }
 
 func Infof(format string, args ...interface{}) {
-	Logger.Infof(format, args...)
+	if Logger != nil {
+		Logger.Infof(format, args...)
+	}
 }
 
 func Warn(args ...interface{}) {
-	Logger.Warn(args...)
+	if Logger != nil {
+		Logger.Warn(args...)
+	}
 }
 
 func Warnf(format string, args ...interface{}) {
-	Logger.Warnf(format, args...)
+	if Logger != nil {
+		Logger.Warnf(format, args...)
+	}
 }
 
 func Error(args ...interface{}) {
-	Logger.Error(args...)
+	if Logger != nil {
+		Logger.Error(args...)
+	}
 }
 
 func Errorf(format string, args ...interface{}) {
-	Logger.Errorf(format, args...)
+	if Logger != nil {
+		Logger.Errorf(format, args...)
+	}
 }
 
 func Fatal(args ...interface{}) {

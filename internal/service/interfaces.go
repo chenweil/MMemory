@@ -61,3 +61,27 @@ type NotificationService interface {
 	SendReminder(ctx context.Context, log *models.ReminderLog) error
 	SendFollowUp(ctx context.Context, log *models.ReminderLog) error
 }
+
+// ConversationService 对话服务接口
+type ConversationService interface {
+	// CreateConversation 创建对话上下文
+	CreateConversation(ctx context.Context, userID uint, contextType models.ContextType, contextData interface{}, ttl time.Duration) (*models.Conversation, error)
+	
+	// GetConversation 获取用户对话上下文
+	GetConversation(ctx context.Context, userID uint, contextType models.ContextType) (*models.Conversation, error)
+	
+	// UpdateConversation 更新对话上下文
+	UpdateConversation(ctx context.Context, conversation *models.Conversation, contextData interface{}) error
+	
+	// ClearConversation 清除对话上下文
+	ClearConversation(ctx context.Context, userID uint, contextType models.ContextType) error
+	
+	// IsConversationActive 检查对话是否活跃
+	IsConversationActive(ctx context.Context, userID uint, contextType models.ContextType) (bool, error)
+	
+	// CleanupExpiredConversations 清理过期对话
+	CleanupExpiredConversations(ctx context.Context) error
+	
+	// GetContextData 获取上下文数据
+	GetContextData(ctx context.Context, userID uint, contextType models.ContextType, target interface{}) error
+}

@@ -12,6 +12,15 @@ const (
 	ReminderTypeTask  ReminderType = "task"  // 任务提醒
 )
 
+// ReminderStatus 提醒状态（用于统计）
+type ReminderStatStatus string
+
+const (
+	ReminderStatStatusActive   ReminderStatStatus = "active"   // 活跃
+	ReminderStatStatusCompleted ReminderStatStatus = "completed" // 已完成
+	ReminderStatStatusExpired   ReminderStatStatus = "expired"   // 已过期
+)
+
 // SchedulePattern 调度模式
 type SchedulePattern string
 

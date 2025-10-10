@@ -16,13 +16,18 @@ import (
 	"mmemory/internal/bot/handlers"
 	"mmemory/internal/repository/sqlite"
 	"mmemory/internal/service"
+	"mmemory/pkg/ai"
 	"mmemory/pkg/config"
 	"mmemory/pkg/logger"
+	"mmemory/pkg/server"
 )
 
 func main() {
+	// 创建配置管理器
+	configManager := config.NewConfigManager()
+	
 	// 加载配置
-	cfg, err := config.Load()
+	cfg, err := configManager.Load()
 	if err != nil {
 		log.Fatalf("加载配置失败: %v", err)
 	}
@@ -33,6 +38,12 @@ func main() {
 	}
 
 	logger.Infof("🚀 启动 %s %s", cfg.App.Name, cfg.App.Version)
+	
+	// 创建热更新管理器
+	hotReloadManager := config.NewHotReloadManager(configManager)
+	
+	// 注册配置变更监听器
+	setupConfigListeners(configManager, hotReloadManager)
 
 	// 初始化数据库
 	database, err := sqlite.NewDatabase(&cfg.Database)
@@ -47,6 +58,7 @@ func main() {
 	userRepo := sqlite.NewUserRepository(database.GetDB())
 	reminderRepo := sqlite.NewReminderRepository(database.GetDB())
 	reminderLogRepo := sqlite.NewReminderLogRepository(database.GetDB())
+	conversationRepo := sqlite.NewConversationRepository(database.GetDB())
 
 	// 初始化Telegram Bot（使用自定义HTTP客户端）
 	bot, err := bot.NewBotWithCustomClient(cfg.Bot.Token, cfg.Bot.Debug)
@@ -62,14 +74,88 @@ func main() {
 	reminderLogService := service.NewReminderLogService(reminderLogRepo, reminderRepo)
 	notificationService := service.NewNotificationService(bot)
 	schedulerService := service.NewSchedulerService(reminderRepo, reminderLogRepo, notificationService)
+	monitoringService := service.NewMonitoringService(userRepo, reminderRepo, reminderLogRepo)
+	conversationService := service.NewConversationService(conversationRepo)
+
+	// 初始化AI服务（如果启用）
+	var aiParserService service.AIParserService
+	if cfg.AI.Enabled {
+		logger.Info("🤖 AI功能已启用")
+
+		// 获取默认配置
+		defaultConfig := ai.GetDefaultAIConfig()
+
+		// 转换配置格式，空值使用默认值
+		aiConfig := &ai.AIConfig{
+			Enabled: cfg.AI.Enabled,
+			OpenAI: ai.OpenAIConfig{
+				APIKey:       cfg.AI.OpenAI.APIKey,
+				BaseURL:      cfg.AI.OpenAI.BaseURL,
+				PrimaryModel: cfg.AI.OpenAI.PrimaryModel,
+				BackupModel:  cfg.AI.OpenAI.BackupModel,
+				Temperature:  cfg.AI.OpenAI.Temperature,
+				MaxTokens:    cfg.AI.OpenAI.MaxTokens,
+				Timeout:      cfg.AI.OpenAI.Timeout,
+				MaxRetries:   cfg.AI.OpenAI.MaxRetries,
+			},
+			Prompts: ai.PromptsConfig{
+				ReminderParse: cfg.AI.Prompts.ReminderParse,
+				ChatResponse:  cfg.AI.Prompts.ChatResponse,
+			},
+		}
+
+		// 如果Prompt为空，使用默认值
+		if aiConfig.Prompts.ReminderParse == "" {
+			aiConfig.Prompts.ReminderParse = defaultConfig.Prompts.ReminderParse
+			logger.Info("使用默认的ReminderParse Prompt模板")
+		}
+		if aiConfig.Prompts.ChatResponse == "" {
+			aiConfig.Prompts.ChatResponse = defaultConfig.Prompts.ChatResponse
+			logger.Info("使用默认的ChatResponse Prompt模板")
+		}
+
+		// 验证AI配置
+		if err := aiConfig.Validate(); err != nil {
+			logger.Warnf("AI配置验证失败，将禁用AI功能: %v", err)
+		} else {
+			// 创建AIParserService
+			aiParserService, err = service.NewAIParserService(aiConfig)
+			if err != nil {
+				logger.Warnf("初始化AI解析服务失败，将禁用AI功能: %v", err)
+				aiParserService = nil
+			} else {
+				logger.Info("✅ AI解析服务初始化成功")
+			}
+		}
+	} else {
+		logger.Info("ℹ️ AI功能未启用，使用传统解析器")
+	}
 
 	// 建立服务之间的依赖关系
 	if reminderServiceWithScheduler, ok := reminderService.(interface{ SetScheduler(service.SchedulerService) }); ok {
 		reminderServiceWithScheduler.SetScheduler(schedulerService)
 	}
 
+	// 启动监控服务
+	var metricsServer *server.MetricsServer
+	var monitoringCtx context.Context
+	var monitoringCancel context.CancelFunc
+	
+	if cfg.Monitoring.Enabled {
+		metricsServer = server.NewMetricsServer(cfg.Monitoring.Port)
+		if err := metricsServer.Start(); err != nil {
+			logger.Fatalf("启动指标服务器失败: %v", err)
+		}
+
+		// 启动监控服务
+		monitoringCtx, monitoringCancel = context.WithCancel(context.Background())
+		if err := monitoringService.Start(monitoringCtx); err != nil {
+			logger.Fatalf("启动监控服务失败: %v", err)
+		}
+	}
+
 	// 初始化消息处理器
-	messageHandler := handlers.NewMessageHandler(reminderService, userService, reminderLogService)
+	messageHandler := handlers.NewMessageHandler(reminderService, userService, reminderLogService, aiParserService, conversationService)
 	callbackHandler := handlers.NewCallbackHandler(reminderLogService, schedulerService)
 
 	// 启动调度器
@@ -91,6 +177,26 @@ func main() {
 	go func() {
 		<-sigChan
 		logger.Info("🔄 收到停止信号，正在关闭...")
+		
+		// 停止热更新管理器
+		if hotReloadManager != nil {
+			hotReloadManager.Stop()
+			logger.Info("配置热更新管理器已停止")
+		}
+		
+		// 停止监控服务
+		if cfg.Monitoring.Enabled {
+			if monitoringCancel != nil {
+				monitoringCancel()
+			}
+			if monitoringService != nil {
+				monitoringService.Stop()
+			}
+			if metricsServer != nil {
+				metricsServer.Stop(context.Background())
+			}
+		}
+		
 		cancel()
 	}()
 
@@ -100,6 +206,50 @@ func main() {
 	}
 
 	logger.Info("👋 程序已退出")
+}
+
+// setupConfigListeners 设置配置变更监听器
+func setupConfigListeners(configManager *config.ConfigManager, hotReloadManager *config.HotReloadManager) {
+	ctx := context.Background()
+	
+	// 启动热更新管理器
+	if err := hotReloadManager.Start(ctx); err != nil {
+		logger.Warnf("启动配置热更新失败: %v", err)
+	} else {
+		logger.Info("配置热更新管理器已启动")
+	}
+	
+	// 注册日志配置监听器
+	loggingListener := config.NewLoggingConfigListener(func(level, format, output, filePath string) {
+		logger.Infof("检测到日志配置变更，重新初始化日志系统")
+		if err := logger.Init(level, format, output, filePath); err != nil {
+			logger.Errorf("日志配置热更新失败: %v", err)
+		} else {
+			logger.Info("日志配置热更新成功")
+		}
+	})
+	configManager.AddWatcher(loggingListener)
+	
+	// 注册数据库配置监听器（安全重载）
+	hotReloadManager.RegisterSafeReloadFunc("database", func(newConfig *config.Config) error {
+		logger.Infof("检测到数据库配置变更，连接池参数更新: max_open_conns=%d, max_idle_conns=%d", 
+			newConfig.Database.MaxOpenConns, newConfig.Database.MaxIdleConns)
+		// 这里可以添加数据库连接池的动态调整逻辑
+		return nil
+	})
+	
+	// 注册Bot配置监听器
+	botListener := config.NewBotConfigListener(func(debug bool) {
+		logger.Infof("检测到Bot配置变更，调试模式: %v", debug)
+		// 这里可以添加Bot调试模式的动态调整逻辑
+	})
+	configManager.AddWatcher(botListener)
+	
+	// 注册通用的重载回调
+	configManager.OnReload(func(newConfig *config.Config) {
+		logger.Infof("配置重载完成，当前版本: %s, 环境: %s", 
+			newConfig.App.Version, newConfig.App.Environment)
+	})
 }
 
 // isEOFError 检查是否为EOF相关错误

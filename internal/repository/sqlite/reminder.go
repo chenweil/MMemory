@@ -53,3 +53,24 @@ func (r *reminderRepository) Update(ctx context.Context, reminder *models.Remind
 func (r *reminderRepository) Delete(ctx context.Context, id uint) error {
 	return r.db.WithContext(ctx).Delete(&models.Reminder{}, id).Error
 }
+
+func (r *reminderRepository) CountByStatus(ctx context.Context, status models.ReminderStatStatus) (int64, error) {
+	var count int64
+	
+	switch status {
+	case models.ReminderStatStatusActive:
+		err := r.db.WithContext(ctx).Model(&models.Reminder{}).Where("is_active = ?", true).Count(&count).Error
+		return count, err
+	case models.ReminderStatStatusCompleted:
+		err := r.db.WithContext(ctx).Model(&models.Reminder{}).Where("is_active = ?", false).Count(&count).Error
+		return count, err
+	case models.ReminderStatStatusExpired:
+		// 这里需要根据业务逻辑定义过期的条件
+		err := r.db.WithContext(ctx).Model(&models.Reminder{}).
+			Where("is_active = ? AND schedule_pattern = ?", true, string(models.SchedulePatternOnce)).
+			Count(&count).Error
+		return count, err
+	default:
+		return 0, nil
+	}
+}

@@ -9,7 +9,15 @@
       "Bash(go test:*)",
       "Bash(go get:*)",
       "Bash(chmod:*)",
-      "Bash(docker build:*)"
+      "Bash(docker build:*)",
+      "Bash(git commit:*)",
+      "mcp__zen__thinkdeep",
+      "Bash(docker-compose:*)",
+      "Bash(go:*)",
+      "Bash(tee:*)",
+      "Bash(docker exec:*)",
+      "Bash(docker logs:*)",
+      "Bash(make:*)"
     ],
     "deny": [],
     "ask": []

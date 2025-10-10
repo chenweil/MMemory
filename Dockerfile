@@ -1,5 +1,5 @@
 # 使用更新的Go镜像作为构建环境
-FROM golang:1.21 AS builder
+FROM golang:1.24.5 AS builder
 
 # 设置工作目录
 WORKDIR /app

@@ -345,7 +345,7 @@ func TestNotificationService_MessageContent(t *testing.T) {
 			if len(service.sentMessages) > initialCount {
 				msg := service.sentMessages[len(service.sentMessages)-1]
 				for _, want := range tt.wantContains {
-					if !contains(msg, want) {
+					if !testContains(msg, want) {
 						t.Errorf("消息内容缺少 '%s': %s", want, msg)
 					}
 				}
@@ -355,7 +355,7 @@ func TestNotificationService_MessageContent(t *testing.T) {
 }
 
 // 辅助函数：检查字符串是否包含子字符串
-func contains(s, substr string) bool {
+func testContains(s, substr string) bool {
 	if len(substr) == 0 {
 		return true
 	}

@@ -8,23 +8,39 @@ services:
     environment:
       # Telegram Bot Token (必须设置)
       - TELEGRAM_BOT_TOKEN=${TELEGRAM_BOT_TOKEN}
-      
+
       # 数据库配置
       - DATABASE_PATH=/app/data/mmemory.db
-      
+
       # 应用配置
       - ENVIRONMENT=production
       - LOG_LEVEL=info
       - LOG_FORMAT=json
-      
+
       # 时区设置
       - TZ=Asia/Shanghai
+
+      # AI Configuration (OpenAI)
+      - MMEMORY_AI_ENABLED=${MMEMORY_AI_ENABLED:-true}
+      - MMEMORY_AI_OPENAI_API_KEY=${MMEMORY_AI_OPENAI_API_KEY}
+      - MMEMORY_AI_OPENAI_BASE_URL=${MMEMORY_AI_OPENAI_BASE_URL:-https://api.openai.com/v1}
+      - MMEMORY_AI_OPENAI_PRIMARY_MODEL=${MMEMORY_AI_OPENAI_PRIMARY_MODEL:-gpt-4o-mini}
+      - MMEMORY_AI_OPENAI_BACKUP_MODEL=${MMEMORY_AI_OPENAI_BACKUP_MODEL:-gpt-3.5-turbo}
+      - MMEMORY_AI_OPENAI_TEMPERATURE=${MMEMORY_AI_OPENAI_TEMPERATURE:-0.1}
+      - MMEMORY_AI_OPENAI_MAX_TOKENS=${MMEMORY_AI_OPENAI_MAX_TOKENS:-1000}
+      - MMEMORY_AI_OPENAI_TIMEOUT=${MMEMORY_AI_OPENAI_TIMEOUT:-30s}
+      - MMEMORY_AI_OPENAI_MAX_RETRIES=${MMEMORY_AI_OPENAI_MAX_RETRIES:-3}
     volumes:
       # 持久化数据库文件
       - ./data:/app/data
       
       # 可选：挂载自定义配置文件
       # - ./configs/config.yaml:/app/configs/config.yaml:ro
+    ports:
+      # 应用端口
+      - "8080:8080"
+      # 监控端口
+      - "9090:9090"
     networks:
       - mmemory-network
     healthcheck:
