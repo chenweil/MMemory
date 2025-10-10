@@ -1,5 +1,5 @@
 bot:
-  token: "8479463724:AAHzlbx-9qMUarK5BMG9hAnbAzvCQT1IJ9g"
+  token: ""  # 从环境变量 MMEMORY_BOT_TOKEN 读取
   debug: false
   webhook:
     enabled: false
