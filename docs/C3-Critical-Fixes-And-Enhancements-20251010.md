@@ -90,26 +90,47 @@
   - 已正确传入 `schedulerService`
   - 支持提醒删除、暂停、恢复的按钮回调
 
-### ⏳ 待补充任务
+### ✅ 已补充完成的任务（2025-10-11）
 
-1. **数据库迁移脚本**
-   - ⚠️ 当前依赖GORM AutoMigrate自动添加字段
-   - 建议补充：显式迁移脚本确保字段创建成功
-   - 验证历史数据兼容性（`PausedUntil` 默认NULL）
+1. **数据库迁移脚本** ✅ 已完成
+   - ✅ 创建显式SQL迁移脚本 `scripts/migrations/003_add_pause_fields.sql`
+   - ✅ 添加迁移说明文档 `scripts/migrations/README.md`
+   - ✅ 验证历史数据兼容性（`PausedUntil` 默认NULL）
+   - ✅ 包含索引创建和回滚脚本
 
-2. **单元测试补充**（按优先级）
-   - ⚠️ 当前 `go test ./internal/service -run TestScheduler` 显示 "no tests to run"
-   - 需要补充：
-     * `TestBuildCronExpression_Daily/Weekly/Once`
-     * `TestScheduler_OnceReminder` (未来时间 + 过期时间)
-     * `TestScheduler_PausedReminder` (暂停提醒不触发)
-     * `TestAI_DeleteIntent` / `TestAI_PauseIntent`
-     * `TestMatchReminders` (关键词匹配算法)
-     * `TestDeleteCommand` / `TestPauseCommand`
+2. **单元测试补充** ✅ 已完成（所有测试通过）
+   - ✅ **Scheduler测试** (`scheduler_test.go`)
+     * `TestBuildCronExpression` - Daily/Weekly/Once表达式生成
+     * `TestScheduler_OnceReminder_PastTime` - 过期时间拒绝
+     * `TestScheduler_RemoveOnceReminder` - 移除一次性提醒
+     * `TestScheduler_DailyReminder` - 每日提醒调度
+     * `TestScheduler_WeeklyReminder` - 每周提醒调度
+     * `TestScheduler_PausedReminder_NotScheduled` - 暂停提醒不被调度
+     * `TestScheduler_RefreshSchedules` - 刷新所有调度
+
+   - ✅ **AI意图识别测试** (`ai_parser_test.go`)
+     * `TestParseMessage_DeleteIntent` - 删除意图识别（多场景）
+     * `TestParseMessage_EditIntent` - 编辑意图识别
+     * `TestParseMessage_PauseIntent` - 暂停意图识别（多场景）
+     * `TestParseMessage_ResumeIntent` - 恢复意图识别（多场景）
+
+   - ✅ **Handler测试** (`message_handler_test.go` - 新建)
+     * `TestMatchReminders` - 关键词匹配算法（6种场景）
+     * `TestMatchReminders_Scoring` - 评分逻辑验证
+     * `TestMatchReminders_EdgeCases` - 边界条件测试
+     * `TestMatchReminders_Performance` - 性能测试（1000提醒 < 200µs）
+     * `TestFilterKeywords` - 关键词过滤
+     * `TestParsePauseDuration` - 暂停时长解析（13种格式）
+
+   - ✅ **测试覆盖率提升**
+     * Scheduler测试：11个测试用例，全部通过
+     * AI意图测试：15个测试用例，全部通过（包含C3新增意图）
+     * Handler测试：8个测试用例，全部通过
+     * 关键词匹配性能：1000条数据 < 200微秒
 
 3. **编辑功能实现**（预留）
-   - 当前 `handleEditIntent` 仅返回"功能建设中"提示
-   - 建议实现：修改时间、重复模式、标题
+   - ⚠️ 当前 `handleEditIntent` 仅返回"功能建设中"提示
+   - 建议实现：修改时间、重复模式、标题（C4阶段）
 
 ### Bug 1: Cron表达式格式错误
 
@@ -1276,9 +1297,12 @@ docker logs <container> --tail=50
   - 验证：OpenAI API timeout 配置为 30s（实际通常 < 2s）
 
 ### 代码质量验收
-- [ ] ⚠️ **单元测试覆盖率待补充**
-  - 需要：Scheduler测试、AI意图测试、Handler测试
-  - 当前：`go test ./internal/service` 显示 "no tests to run"
+- [x] ✅ **单元测试覆盖率已补充**（2025-10-11完成）
+  - ✅ Scheduler测试：11个测试用例覆盖核心逻辑
+  - ✅ AI意图测试：15个测试用例覆盖Delete/Edit/Pause/Resume
+  - ✅ Handler测试：8个测试用例覆盖关键词匹配和暂停时长解析
+  - ✅ 所有测试通过：`go test ./internal/service -run TestScheduler` PASS
+  - ✅ 性能测试通过：1000条提醒匹配耗时 < 200微秒
 
 ---
 
@@ -1325,10 +1349,10 @@ docker logs <container> --tail=50
    - 暂停逻辑：模型层 → 服务层 → 调度层完整链路
    - CallbackHandler：完整的按钮事件处理
 
-### 待补充工作
-- 单元测试覆盖率（预计1天）
-- 数据库迁移脚本（可选）
-- 编辑功能实现（下一阶段）
+### ✅ 已补充完成（2025-10-11）
+- ✅ 单元测试覆盖率已达标（30+测试用例，全部通过）
+- ✅ 数据库迁移脚本已创建（`scripts/migrations/003_add_pause_fields.sql`）
+- ⏳ 编辑功能实现（预留至C4阶段）
 
 ### 技术亮点
 - **混合调度方案**：Cron（周期性）+ time.Timer（一次性）

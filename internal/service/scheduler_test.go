@@ -323,3 +323,266 @@ func (m *mockReminderLogRepository) Delete(ctx context.Context, id uint) error {
 	delete(m.logs, id)
 	return nil
 }
+
+// TestScheduler_OnceReminder_PastTime 测试过期时间的once提醒
+func TestScheduler_OnceReminder_PastTime(t *testing.T) {
+	mockReminderRepo := newMockReminderRepository()
+	mockLogRepo := newMockReminderLogRepository()
+	mockNotification := newMockNotificationService()
+
+	scheduler := NewSchedulerService(mockReminderRepo, mockLogRepo, mockNotification).(*schedulerService)
+
+	// 创建一个过去日期的提醒
+	pastDate := time.Now().Add(-24 * time.Hour).Format("2006-01-02")
+	reminder := &models.Reminder{
+		ID:              300,
+		UserID:          1,
+		Title:           "过期提醒",
+		SchedulePattern: fmt.Sprintf("%s%s", string(models.SchedulePatternOnce), pastDate),
+		TargetTime:      "10:00:00",
+		IsActive:        true,
+	}
+
+	// 添加提醒应该失败
+	err := scheduler.AddReminder(reminder)
+	if err == nil {
+		t.Fatal("期待过期提醒返回错误，但得到 nil")
+	}
+
+	// 验证错误信息
+	if !containsSubstring(err.Error(), "过期") && !containsSubstring(err.Error(), "past") {
+		t.Errorf("期待错误信息包含'过期'或'past'，实际得到: %v", err)
+	}
+
+	// 验证没有创建定时器
+	scheduler.mu.RLock()
+	_, exists := scheduler.onceTimers[reminder.ID]
+	scheduler.mu.RUnlock()
+
+	if exists {
+		t.Fatal("过期提醒不应该创建定时器")
+	}
+}
+
+// TestScheduler_RemoveOnceReminder 测试移除一次性提醒
+func TestScheduler_RemoveOnceReminder(t *testing.T) {
+	mockReminderRepo := newMockReminderRepository()
+	mockLogRepo := newMockReminderLogRepository()
+	mockNotification := newMockNotificationService()
+
+	scheduler := NewSchedulerService(mockReminderRepo, mockLogRepo, mockNotification).(*schedulerService)
+
+	// 创建一个未来的once提醒
+	futureDate := time.Now().Add(72 * time.Hour).Format("2006-01-02")
+	reminder := &models.Reminder{
+		ID:              400,
+		UserID:          1,
+		Title:           "测试移除",
+		SchedulePattern: fmt.Sprintf("%s%s", string(models.SchedulePatternOnce), futureDate),
+		TargetTime:      "14:00:00",
+		IsActive:        true,
+	}
+
+	// 添加提醒
+	if err := scheduler.AddReminder(reminder); err != nil {
+		t.Fatalf("AddReminder() 失败: %v", err)
+	}
+
+	// 验证定时器已创建
+	scheduler.mu.RLock()
+	timer, exists := scheduler.onceTimers[reminder.ID]
+	scheduler.mu.RUnlock()
+
+	if !exists || timer == nil {
+		t.Fatal("期待创建定时器")
+	}
+
+	// 移除提醒
+	if err := scheduler.RemoveReminder(reminder.ID); err != nil {
+		t.Fatalf("RemoveReminder() 失败: %v", err)
+	}
+
+	// 验证定时器已移除
+	scheduler.mu.RLock()
+	_, exists = scheduler.onceTimers[reminder.ID]
+	scheduler.mu.RUnlock()
+
+	if exists {
+		t.Fatal("期待定时器已被移除")
+	}
+}
+
+// TestScheduler_DailyReminder 测试每日提醒调度
+func TestScheduler_DailyReminder(t *testing.T) {
+	mockReminderRepo := newMockReminderRepository()
+	mockLogRepo := newMockReminderLogRepository()
+	mockNotification := newMockNotificationService()
+
+	scheduler := NewSchedulerService(mockReminderRepo, mockLogRepo, mockNotification).(*schedulerService)
+
+	reminder := &models.Reminder{
+		ID:              500,
+		UserID:          1,
+		Title:           "每日提醒",
+		SchedulePattern: "daily",
+		TargetTime:      "09:30:00",
+		IsActive:        true,
+	}
+
+	if err := scheduler.AddReminder(reminder); err != nil {
+		t.Fatalf("AddReminder() 失败: %v", err)
+	}
+
+	// 验证cron任务已添加
+	scheduler.mu.RLock()
+	_, exists := scheduler.jobs[reminder.ID]
+	scheduler.mu.RUnlock()
+
+	if !exists {
+		t.Fatal("期待创建cron任务")
+	}
+
+	// 清理
+	if err := scheduler.RemoveReminder(reminder.ID); err != nil {
+		t.Fatalf("RemoveReminder() 失败: %v", err)
+	}
+}
+
+// TestScheduler_WeeklyReminder 测试每周提醒调度
+func TestScheduler_WeeklyReminder(t *testing.T) {
+	mockReminderRepo := newMockReminderRepository()
+	mockLogRepo := newMockReminderLogRepository()
+	mockNotification := newMockNotificationService()
+
+	scheduler := NewSchedulerService(mockReminderRepo, mockLogRepo, mockNotification).(*schedulerService)
+
+	reminder := &models.Reminder{
+		ID:              600,
+		UserID:          1,
+		Title:           "工作日提醒",
+		SchedulePattern: "weekly:1,2,3,4,5",
+		TargetTime:      "08:00:00",
+		IsActive:        true,
+	}
+
+	if err := scheduler.AddReminder(reminder); err != nil {
+		t.Fatalf("AddReminder() 失败: %v", err)
+	}
+
+	// 验证cron任务已添加
+	scheduler.mu.RLock()
+	_, exists := scheduler.jobs[reminder.ID]
+	scheduler.mu.RUnlock()
+
+	if !exists {
+		t.Fatal("期待创建cron任务")
+	}
+
+	// 清理
+	if err := scheduler.RemoveReminder(reminder.ID); err != nil {
+		t.Fatalf("RemoveReminder() 失败: %v", err)
+	}
+}
+
+// TestScheduler_PausedReminder_NotScheduled 测试暂停的提醒不被调度
+func TestScheduler_PausedReminder_NotScheduled(t *testing.T) {
+	mockReminderRepo := newMockReminderRepository()
+	mockLogRepo := newMockReminderLogRepository()
+	mockNotification := newMockNotificationService()
+
+	scheduler := NewSchedulerService(mockReminderRepo, mockLogRepo, mockNotification).(*schedulerService)
+
+	// 创建一个暂停的每日提醒
+	pausedUntil := time.Now().Add(7 * 24 * time.Hour)
+	reminder := &models.Reminder{
+		ID:              700,
+		UserID:          1,
+		Title:           "暂停的提醒",
+		SchedulePattern: "daily",
+		TargetTime:      "10:00:00",
+		IsActive:        true,
+		PausedUntil:     &pausedUntil,
+		PauseReason:     "测试暂停",
+	}
+
+	// 添加提醒不应该报错
+	if err := scheduler.AddReminder(reminder); err != nil {
+		t.Fatalf("AddReminder() 失败: %v", err)
+	}
+
+	// 验证没有创建任何调度任务
+	scheduler.mu.RLock()
+	_, jobExists := scheduler.jobs[reminder.ID]
+	_, timerExists := scheduler.onceTimers[reminder.ID]
+	scheduler.mu.RUnlock()
+
+	if jobExists || timerExists {
+		t.Fatal("暂停的提醒不应该被调度")
+	}
+}
+
+// TestScheduler_RefreshSchedules 测试刷新所有调度
+func TestScheduler_RefreshSchedules(t *testing.T) {
+	mockReminderRepo := newMockReminderRepository()
+	mockLogRepo := newMockReminderLogRepository()
+	mockNotification := newMockNotificationService()
+
+	scheduler := NewSchedulerService(mockReminderRepo, mockLogRepo, mockNotification).(*schedulerService)
+
+	// 添加几个提醒到仓库
+	reminder1 := &models.Reminder{
+		ID:              801,
+		UserID:          1,
+		Title:           "提醒1",
+		SchedulePattern: "daily",
+		TargetTime:      "09:00:00",
+		IsActive:        true,
+	}
+	reminder2 := &models.Reminder{
+		ID:              802,
+		UserID:          1,
+		Title:           "提醒2",
+		SchedulePattern: "daily",
+		TargetTime:      "18:00:00",
+		IsActive:        true,
+	}
+
+	mockReminderRepo.Create(context.Background(), reminder1)
+	mockReminderRepo.Create(context.Background(), reminder2)
+
+	// 刷新调度
+	if err := scheduler.RefreshSchedules(); err != nil {
+		t.Fatalf("RefreshSchedules() 失败: %v", err)
+	}
+
+	// 验证调度任务已创建
+	scheduler.mu.RLock()
+	job1Exists := scheduler.jobs[reminder1.ID] != 0
+	job2Exists := scheduler.jobs[reminder2.ID] != 0
+	activeCount := len(scheduler.jobs) + len(scheduler.onceTimers)
+	scheduler.mu.RUnlock()
+
+	if !job1Exists || !job2Exists {
+		t.Fatal("期待所有活跃提醒都被调度")
+	}
+
+	if activeCount != 2 {
+		t.Errorf("期待2个活跃任务，实际得到 %d", activeCount)
+	}
+}
+
+// Helper function
+func containsSubstring(s, substr string) bool {
+	return len(s) > 0 && len(substr) > 0 && (s == substr || len(s) > len(substr) &&
+		(s[:len(substr)] == substr || s[len(s)-len(substr):] == substr ||
+		findSubstringHelper(s, substr)))
+}
+
+func findSubstringHelper(s, substr string) bool {
+	for i := 0; i+len(substr) <= len(s); i++ {
+		if s[i:i+len(substr)] == substr {
+			return true
+		}
+	}
+	return false
+}

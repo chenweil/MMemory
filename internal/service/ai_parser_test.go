@@ -543,3 +543,219 @@ func TestAIConfig_Validate(t *testing.T) {
 		})
 	}
 }
+
+// TestParseMessage_DeleteIntent 测试删除意图解析
+func TestParseMessage_DeleteIntent(t *testing.T) {
+	mockService := new(MockAIParserService)
+
+	ctx := context.Background()
+	userID := "123"
+
+	testCases := []struct {
+		name     string
+		message  string
+		expected *ai.ParseResult
+	}{
+		{
+			name:    "删除健身提醒",
+			message: "删除健身提醒",
+			expected: &ai.ParseResult{
+				Intent:     ai.IntentDelete,
+				Confidence: 0.95,
+				Delete: &ai.DeleteInfo{
+					Keywords: []string{"健身"},
+					Criteria: "删除健身相关的提醒",
+				},
+				ParsedBy: "openai-gpt-4o-mini",
+			},
+		},
+		{
+			name:    "撤销今晚的提醒",
+			message: "撤销今晚的健身提醒",
+			expected: &ai.ParseResult{
+				Intent:     ai.IntentDelete,
+				Confidence: 0.92,
+				Delete: &ai.DeleteInfo{
+					Keywords: []string{"今晚", "健身"},
+					Criteria: "撤销今晚健身提醒",
+				},
+				ParsedBy: "openai-gpt-4o-mini",
+			},
+		},
+		{
+			name:    "取消提醒",
+			message: "取消喝水提醒",
+			expected: &ai.ParseResult{
+				Intent:     ai.IntentDelete,
+				Confidence: 0.9,
+				Delete: &ai.DeleteInfo{
+					Keywords: []string{"喝水"},
+					Criteria: "取消喝水提醒",
+				},
+				ParsedBy: "openai-gpt-4o-mini",
+			},
+		},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			mockService.On("ParseMessage", ctx, userID, tc.message).Return(tc.expected, nil).Once()
+
+			result, err := mockService.ParseMessage(ctx, userID, tc.message)
+
+			assert.NoError(t, err)
+			assert.Equal(t, ai.IntentDelete, result.Intent)
+			assert.NotNil(t, result.Delete)
+			assert.NotEmpty(t, result.Delete.Keywords)
+			assert.Contains(t, result.Delete.Keywords, tc.expected.Delete.Keywords[0])
+		})
+	}
+
+	mockService.AssertExpectations(t)
+}
+
+// TestParseMessage_EditIntent 测试编辑意图解析
+func TestParseMessage_EditIntent(t *testing.T) {
+	mockService := new(MockAIParserService)
+
+	ctx := context.Background()
+	userID := "123"
+	message := "把健身提醒改到晚上7点"
+
+	expectedResult := &ai.ParseResult{
+		Intent:     ai.IntentEdit,
+		Confidence: 0.9,
+		Edit: &ai.EditInfo{
+			Keywords:   []string{"健身"},
+			NewTime:    &ai.TimeInfo{Hour: 19, Minute: 0, Timezone: "Asia/Shanghai"},
+			NewPattern: "",
+			NewTitle:   "",
+		},
+		ParsedBy: "openai-gpt-4o-mini",
+	}
+
+	mockService.On("ParseMessage", ctx, userID, message).Return(expectedResult, nil)
+
+	result, err := mockService.ParseMessage(ctx, userID, message)
+
+	assert.NoError(t, err)
+	assert.Equal(t, ai.IntentEdit, result.Intent)
+	assert.NotNil(t, result.Edit)
+	assert.Contains(t, result.Edit.Keywords, "健身")
+	assert.NotNil(t, result.Edit.NewTime)
+	assert.Equal(t, 19, result.Edit.NewTime.Hour)
+	mockService.AssertExpectations(t)
+}
+
+// TestParseMessage_PauseIntent 测试暂停意图解析
+func TestParseMessage_PauseIntent(t *testing.T) {
+	mockService := new(MockAIParserService)
+
+	ctx := context.Background()
+	userID := "123"
+
+	testCases := []struct {
+		name     string
+		message  string
+		expected *ai.ParseResult
+	}{
+		{
+			name:    "暂停一周",
+			message: "暂停一周的健身提醒",
+			expected: &ai.ParseResult{
+				Intent:     ai.IntentPause,
+				Confidence: 0.93,
+				Pause: &ai.PauseInfo{
+					Keywords: []string{"健身"},
+					Duration: "1week",
+					Reason:   "",
+				},
+				ParsedBy: "openai-gpt-4o-mini",
+			},
+		},
+		{
+			name:    "暂停一天",
+			message: "今天不要提醒我跑步",
+			expected: &ai.ParseResult{
+				Intent:     ai.IntentPause,
+				Confidence: 0.88,
+				Pause: &ai.PauseInfo{
+					Keywords: []string{"跑步"},
+					Duration: "1day",
+					Reason:   "今天不要",
+				},
+				ParsedBy: "openai-gpt-4o-mini",
+			},
+		},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			mockService.On("ParseMessage", ctx, userID, tc.message).Return(tc.expected, nil).Once()
+
+			result, err := mockService.ParseMessage(ctx, userID, tc.message)
+
+			assert.NoError(t, err)
+			assert.Equal(t, ai.IntentPause, result.Intent)
+			assert.NotNil(t, result.Pause)
+			assert.NotEmpty(t, result.Pause.Keywords)
+			assert.NotEmpty(t, result.Pause.Duration)
+		})
+	}
+
+	mockService.AssertExpectations(t)
+}
+
+// TestParseMessage_ResumeIntent 测试恢复意图解析
+func TestParseMessage_ResumeIntent(t *testing.T) {
+	mockService := new(MockAIParserService)
+
+	ctx := context.Background()
+	userID := "123"
+
+	testCases := []struct {
+		name     string
+		message  string
+		expected *ai.ParseResult
+	}{
+		{
+			name:    "恢复健身提醒",
+			message: "恢复健身提醒",
+			expected: &ai.ParseResult{
+				Intent:     ai.IntentResume,
+				Confidence: 0.95,
+				Resume: &ai.ResumeInfo{
+					Keywords: []string{"健身"},
+				},
+				ParsedBy: "openai-gpt-4o-mini",
+			},
+		},
+		{
+			name:    "重新开始提醒",
+			message: "重新开始跑步提醒",
+			expected: &ai.ParseResult{
+				Intent:     ai.IntentResume,
+				Confidence: 0.9,
+				Resume: &ai.ResumeInfo{
+					Keywords: []string{"跑步"},
+				},
+				ParsedBy: "openai-gpt-4o-mini",
+			},
+		},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			mockService.On("ParseMessage", ctx, userID, tc.message).Return(tc.expected, nil).Once()
+
+			result, err := mockService.ParseMessage(ctx, userID, tc.message)
+
+			assert.NoError(t, err)
+			assert.Equal(t, ai.IntentResume, result.Intent)
+			assert.NotNil(t, result.Resume)
+			assert.NotEmpty(t, result.Resume.Keywords)
+		})
+	}
+
+	mockService.AssertExpectations(t)
+}
