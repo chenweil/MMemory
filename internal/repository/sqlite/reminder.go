@@ -56,7 +56,7 @@ func (r *reminderRepository) Delete(ctx context.Context, id uint) error {
 
 func (r *reminderRepository) CountByStatus(ctx context.Context, status models.ReminderStatStatus) (int64, error) {
 	var count int64
-	
+
 	switch status {
 	case models.ReminderStatStatusActive:
 		err := r.db.WithContext(ctx).Model(&models.Reminder{}).Where("is_active = ?", true).Count(&count).Error
@@ -67,7 +67,7 @@ func (r *reminderRepository) CountByStatus(ctx context.Context, status models.Re
 	case models.ReminderStatStatusExpired:
 		// 这里需要根据业务逻辑定义过期的条件
 		err := r.db.WithContext(ctx).Model(&models.Reminder{}).
-			Where("is_active = ? AND schedule_pattern = ?", true, string(models.SchedulePatternOnce)).
+			Where("is_active = ? AND schedule_pattern LIKE ?", true, string(models.SchedulePatternOnce)+"%").
 			Count(&count).Error
 		return count, err
 	default:

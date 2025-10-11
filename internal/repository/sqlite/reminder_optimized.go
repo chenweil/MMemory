@@ -2,8 +2,9 @@ package sqlite
 
 import (
 	"context"
-	"time"
 	"fmt"
+	"strings"
+	"time"
 
 	"gorm.io/gorm"
 
@@ -102,7 +103,7 @@ func (r *OptimizedReminderRepository) GetByUserID(ctx context.Context, userID ui
 // GetActiveReminders 获取所有活跃的提醒（优化版）
 func (r *OptimizedReminderRepository) GetActiveReminders(ctx context.Context) ([]*models.Reminder, error) {
 	var reminders []*models.Reminder
-	
+
 	// 使用索引字段查询，避免全表扫描
 	err := r.db.WithContext(ctx).
 		Where("is_active = ?", true).
@@ -130,16 +131,16 @@ func (r *OptimizedReminderRepository) Update(ctx context.Context, reminder *mode
 		}
 
 		// 更新记录
-	result := tx.Model(&models.Reminder{}).Where("id = ?", reminder.ID).Updates(map[string]interface{}{
-		"title":            reminder.Title,
-		"description":      reminder.Description,
-		"type":             reminder.Type,
-		"schedule_pattern": reminder.SchedulePattern,
-		"target_time":      reminder.TargetTime,
-		"timezone":         reminder.Timezone,
-		"is_active":        reminder.IsActive,
-		"updated_at":       time.Now(),
-	})
+		result := tx.Model(&models.Reminder{}).Where("id = ?", reminder.ID).Updates(map[string]interface{}{
+			"title":            reminder.Title,
+			"description":      reminder.Description,
+			"type":             reminder.Type,
+			"schedule_pattern": reminder.SchedulePattern,
+			"target_time":      reminder.TargetTime,
+			"timezone":         reminder.Timezone,
+			"is_active":        reminder.IsActive,
+			"updated_at":       time.Now(),
+		})
 		if result.Error != nil {
 			fmt.Errorf("更新提醒失败 (ID: %d): %v", reminder.ID, result.Error)
 			return fmt.Errorf("更新提醒失败: %w", result.Error)
@@ -186,7 +187,7 @@ func (r *OptimizedReminderRepository) Delete(ctx context.Context, id uint) error
 // CountByStatus 按状态统计提醒数量
 func (r *OptimizedReminderRepository) CountByStatus(ctx context.Context, status models.ReminderStatStatus) (int64, error) {
 	var count int64
-	
+
 	switch status {
 	case models.ReminderStatStatusActive:
 		err := r.db.WithContext(ctx).Model(&models.Reminder{}).Where("is_active = ?", true).Count(&count).Error
@@ -197,7 +198,7 @@ func (r *OptimizedReminderRepository) CountByStatus(ctx context.Context, status 
 	case models.ReminderStatStatusExpired:
 		// 这里需要根据业务逻辑定义过期的条件
 		err := r.db.WithContext(ctx).Model(&models.Reminder{}).
-			Where("is_active = ? AND schedule_pattern = ?", true, string(models.SchedulePatternOnce)).
+			Where("is_active = ? AND schedule_pattern LIKE ?", true, string(models.SchedulePatternOnce)+"%").
 			Count(&count).Error
 		return count, err
 	default:
@@ -239,12 +240,12 @@ func (r *OptimizedReminderRepository) isValidTimeFormat(timeStr string) bool {
 	if len(timeStr) != 8 || timeStr[2] != ':' || timeStr[5] != ':' {
 		return false
 	}
-	
+
 	// 解析各部分
 	hour := timeStr[0:2]
 	minute := timeStr[3:5]
 	second := timeStr[6:8]
-	
+
 	// 验证数字范围和格式
 	var h, m, s int
 	if _, err := fmt.Sscanf(hour, "%d", &h); err != nil || h < 0 || h > 23 {
@@ -256,7 +257,7 @@ func (r *OptimizedReminderRepository) isValidTimeFormat(timeStr string) bool {
 	if _, err := fmt.Sscanf(second, "%d", &s); err != nil || s < 0 || s > 59 {
 		return false
 	}
-	
+
 	return true
 }
 
@@ -272,7 +273,8 @@ func (r *OptimizedReminderRepository) isValidSchedulePattern(pattern string) boo
 	if len(pattern) > 8 && pattern[:8] == "monthly:" {
 		return true
 	}
-	if len(pattern) > 5 && pattern[:5] == "once:" {
+	if strings.HasPrefix(pattern, string(models.SchedulePatternOnce)) &&
+		len(pattern) > len(string(models.SchedulePatternOnce)) {
 		return true
 	}
 	return false
@@ -281,7 +283,7 @@ func (r *OptimizedReminderRepository) isValidSchedulePattern(pattern string) boo
 // GetBySchedulePattern 根据调度模式获取提醒（新增方法）
 func (r *OptimizedReminderRepository) GetBySchedulePattern(ctx context.Context, pattern string) ([]*models.Reminder, error) {
 	var reminders []*models.Reminder
-	
+
 	err := r.db.WithContext(ctx).
 		Where("schedule_pattern = ? AND is_active = ?", pattern, true).
 		Order("target_time").
@@ -298,7 +300,7 @@ func (r *OptimizedReminderRepository) GetBySchedulePattern(ctx context.Context, 
 // GetByTimeRange 根据时间范围获取提醒（新增方法）
 func (r *OptimizedReminderRepository) GetByTimeRange(ctx context.Context, startTime, endTime string) ([]*models.Reminder, error) {
 	var reminders []*models.Reminder
-	
+
 	err := r.db.WithContext(ctx).
 		Where("target_time >= ? AND target_time <= ? AND is_active = ?", startTime, endTime, true).
 		Order("target_time").

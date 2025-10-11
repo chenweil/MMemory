@@ -100,6 +100,23 @@ func TestRegexParser_TomorrowReminder(t *testing.T) {
 	assert.Contains(t, string(result.Reminder.SchedulePattern), "once:")
 }
 
+// TestRegexParser_TodayReminder 测试当天提醒解析
+func TestRegexParser_TodayReminder(t *testing.T) {
+	parser := NewRegexParser()
+	ctx := context.Background()
+
+	message := "今天15:10 提醒我 去19层第一会议室开会。"
+	result, err := parser.Parse(ctx, "user1", message)
+
+	require.NoError(t, err)
+	assert.Equal(t, ai.IntentReminder, result.Intent)
+	assert.Equal(t, "去19层第一会议室开会", result.Reminder.Title)
+	assert.Equal(t, 15, result.Reminder.Time.Hour)
+	assert.Equal(t, 10, result.Reminder.Time.Minute)
+	assert.Equal(t, models.ReminderTypeTask, result.Reminder.Type)
+	assert.Contains(t, string(result.Reminder.SchedulePattern), "once:")
+}
+
 // TestRegexParser_SpecificDateReminder 测试具体日期提醒解析
 func TestRegexParser_SpecificDateReminder(t *testing.T) {
 	parser := NewRegexParser()

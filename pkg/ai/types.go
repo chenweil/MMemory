@@ -1,6 +1,7 @@
 package ai
 
 import (
+	"strings"
 	"time"
 
 	"mmemory/internal/models"
@@ -11,6 +12,10 @@ type ParseIntent string
 
 const (
 	IntentReminder ParseIntent = "reminder" // 创建提醒
+	IntentDelete   ParseIntent = "delete"   // 删除提醒
+	IntentEdit     ParseIntent = "edit"     // 编辑提醒
+	IntentPause    ParseIntent = "pause"    // 暂停提醒
+	IntentResume   ParseIntent = "resume"   // 恢复提醒
 	IntentChat     ParseIntent = "chat"     // 普通对话
 	IntentSummary  ParseIntent = "summary"  // 总结请求
 	IntentQuery    ParseIntent = "query"    // 查询提醒
@@ -20,7 +25,15 @@ const (
 // IsValid 检查意图是否有效
 func (i ParseIntent) IsValid() bool {
 	switch i {
-	case IntentReminder, IntentChat, IntentSummary, IntentQuery, IntentUnknown:
+	case IntentReminder,
+		IntentDelete,
+		IntentEdit,
+		IntentPause,
+		IntentResume,
+		IntentChat,
+		IntentSummary,
+		IntentQuery,
+		IntentUnknown:
 		return true
 	default:
 		return false
@@ -41,32 +54,44 @@ type ParseResult struct {
 	// 提醒相关（当Intent为reminder时）
 	Reminder *ReminderInfo `json:"reminder,omitempty"`
 
+	// 删除相关
+	Delete *DeleteInfo `json:"delete,omitempty"`
+
+	// 编辑相关
+	Edit *EditInfo `json:"edit,omitempty"`
+
+	// 暂停相关
+	Pause *PauseInfo `json:"pause,omitempty"`
+
+	// 恢复相关
+	Resume *ResumeInfo `json:"resume,omitempty"`
+
 	// 对话相关（当Intent为chat时）
 	ChatResponse *ChatInfo `json:"chat_response,omitempty"`
 
 	// 元信息
-	ParsedBy    string        `json:"parsed_by"`    // "openai-gpt-4"
+	ParsedBy    string        `json:"parsed_by"` // "openai-gpt-4"
 	ProcessTime time.Duration `json:"process_time"`
 	Timestamp   time.Time     `json:"timestamp"`
 }
 
 // ReminderInfo 提醒信息结构
 type ReminderInfo struct {
-	Title           string                   `json:"title"`
-	Type            models.ReminderType      `json:"type"`
-	Time            TimeInfo                 `json:"time"`
-	SchedulePattern models.SchedulePattern   `json:"schedule_pattern"`
-	Description     string                   `json:"description,omitempty"`
+	Title           string                 `json:"title"`
+	Type            models.ReminderType    `json:"type"`
+	Time            TimeInfo               `json:"time"`
+	SchedulePattern models.SchedulePattern `json:"schedule_pattern"`
+	Description     string                 `json:"description,omitempty"`
 }
 
 // TimeInfo 时间信息结构
 type TimeInfo struct {
-	Hour           int    `json:"hour"`
-	Minute         int    `json:"minute"`
-	Timezone       string `json:"timezone"`
+	Hour            int    `json:"hour"`
+	Minute          int    `json:"minute"`
+	Timezone        string `json:"timezone"`
 	ScheduleDetails string `json:"schedule_details,omitempty"` // "weekly:1,3,5"
-	IsRelativeTime bool   `json:"is_relative_time"`           // 是否为相对时间
-	RelativeDesc   string `json:"relative_desc,omitempty"`    // "明天", "下周一"
+	IsRelativeTime  bool   `json:"is_relative_time"`           // 是否为相对时间
+	RelativeDesc    string `json:"relative_desc,omitempty"`    // "明天", "下周一"
 }
 
 // ChatInfo 对话信息结构
@@ -74,6 +99,34 @@ type ChatInfo struct {
 	Response       string `json:"response"`
 	NeedFollowUp   bool   `json:"need_follow_up"`
 	FollowUpPrompt string `json:"follow_up_prompt,omitempty"`
+}
+
+// DeleteInfo 删除提醒信息
+type DeleteInfo struct {
+	Keywords []string `json:"keywords"`
+	Criteria string   `json:"criteria"`
+	Reason   string   `json:"reason,omitempty"`
+}
+
+// EditInfo 编辑提醒信息
+type EditInfo struct {
+	Keywords   []string  `json:"keywords"`
+	NewTime    *TimeInfo `json:"new_time,omitempty"`
+	NewPattern string    `json:"new_pattern,omitempty"`
+	NewTitle   string    `json:"new_title,omitempty"`
+	NewText    string    `json:"new_text,omitempty"`
+}
+
+// PauseInfo 暂停提醒信息
+type PauseInfo struct {
+	Keywords []string `json:"keywords"`
+	Duration string   `json:"duration"`
+	Reason   string   `json:"reason,omitempty"`
+}
+
+// ResumeInfo 恢复提醒信息
+type ResumeInfo struct {
+	Keywords []string `json:"keywords"`
 }
 
 // ChatResponse 对话响应（用于Chat接口）
@@ -104,10 +157,10 @@ const (
 type ParserType string
 
 const (
-	ParserTypePrimaryAI ParserType = "primary_ai"  // 主要AI解析器
-	ParserTypeBackupAI  ParserType = "backup_ai"   // 兜底AI解析器
-	ParserTypeRegex     ParserType = "regex"       // 正则解析器
-	ParserTypeFallback  ParserType = "fallback"    // 兜底对话
+	ParserTypePrimaryAI ParserType = "primary_ai" // 主要AI解析器
+	ParserTypeBackupAI  ParserType = "backup_ai"  // 兜底AI解析器
+	ParserTypeRegex     ParserType = "regex"      // 正则解析器
+	ParserTypeFallback  ParserType = "fallback"   // 兜底对话
 )
 
 // String 返回解析器类型的字符串表示
@@ -174,6 +227,30 @@ func (pr *ParseResult) Validate() ValidationResult {
 		} else {
 			errors = append(errors, pr.validateReminderInfo()...)
 		}
+	case IntentDelete:
+		if pr.Delete == nil {
+			errors = append(errors, "delete info is required for delete intent")
+		} else {
+			errors = append(errors, pr.validateDeleteInfo()...)
+		}
+	case IntentEdit:
+		if pr.Edit == nil {
+			errors = append(errors, "edit info is required for edit intent")
+		} else {
+			errors = append(errors, pr.validateEditInfo()...)
+		}
+	case IntentPause:
+		if pr.Pause == nil {
+			errors = append(errors, "pause info is required for pause intent")
+		} else {
+			errors = append(errors, pr.validatePauseInfo()...)
+		}
+	case IntentResume:
+		if pr.Resume == nil {
+			errors = append(errors, "resume info is required for resume intent")
+		} else {
+			errors = append(errors, pr.validateResumeInfo()...)
+		}
 	case IntentChat:
 		if pr.ChatResponse == nil {
 			errors = append(errors, "chat response is required for chat intent")
@@ -215,4 +292,78 @@ func (pr *ParseResult) validateReminderInfo() []string {
 	}
 
 	return errors
+}
+
+func (pr *ParseResult) validateDeleteInfo() []string {
+	var errors []string
+
+	if pr.Delete == nil {
+		return []string{"delete info is missing"}
+	}
+
+	if len(filterEmpty(pr.Delete.Keywords)) == 0 && strings.TrimSpace(pr.Delete.Criteria) == "" {
+		errors = append(errors, "delete keywords or criteria required")
+	}
+
+	return errors
+}
+
+func (pr *ParseResult) validateEditInfo() []string {
+	var errors []string
+
+	if pr.Edit == nil {
+		return []string{"edit info is missing"}
+	}
+
+	if len(filterEmpty(pr.Edit.Keywords)) == 0 {
+		errors = append(errors, "edit keywords required")
+	}
+
+	if pr.Edit.NewTime == nil && pr.Edit.NewPattern == "" && pr.Edit.NewTitle == "" && pr.Edit.NewText == "" {
+		errors = append(errors, "edit requires at least one field to update")
+	}
+
+	return errors
+}
+
+func (pr *ParseResult) validatePauseInfo() []string {
+	var errors []string
+
+	if pr.Pause == nil {
+		return []string{"pause info is missing"}
+	}
+
+	if len(filterEmpty(pr.Pause.Keywords)) == 0 {
+		errors = append(errors, "pause keywords required")
+	}
+
+	if strings.TrimSpace(pr.Pause.Duration) == "" {
+		errors = append(errors, "pause duration required")
+	}
+
+	return errors
+}
+
+func (pr *ParseResult) validateResumeInfo() []string {
+	var errors []string
+
+	if pr.Resume == nil {
+		return []string{"resume info is missing"}
+	}
+
+	if len(filterEmpty(pr.Resume.Keywords)) == 0 {
+		errors = append(errors, "resume keywords required")
+	}
+
+	return errors
+}
+
+func filterEmpty(values []string) []string {
+	var filtered []string
+	for _, v := range values {
+		if strings.TrimSpace(v) != "" {
+			filtered = append(filtered, strings.TrimSpace(v))
+		}
+	}
+	return filtered
 }

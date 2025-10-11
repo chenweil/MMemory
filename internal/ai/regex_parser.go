@@ -40,6 +40,25 @@ func NewRegexParser() *RegexParser {
 func (p *RegexParser) initPatterns() {
 	// 注意: 模式顺序很重要！更具体的模式应该放在前面
 
+	// 0. 今日具体时间: "今天15:10提醒我开会"、"今天下午3点提醒我开会"
+	p.patterns = append(p.patterns, &ReminderPattern{
+		Pattern: regexp.MustCompile(`今天\s*(上午|中午|下午|晚上|早上|早晨|午后)?\s*(\d{1,2})(?:[:：点时](\d{1,2}))?\s*(?:分)?\s*提醒我\s*(.+)`),
+		Type:    models.ReminderTypeTask,
+		ScheduleGen: func(matches []string) models.SchedulePattern {
+			today := time.Now().Format("2006-01-02")
+			return models.SchedulePattern(fmt.Sprintf("once:%s", today))
+		},
+		TimeGen: func(matches []string) (int, int) {
+			period := matches[1]
+			hour, _ := strconv.Atoi(matches[2])
+			minute := 0
+			if len(matches) > 3 && matches[3] != "" {
+				minute, _ = strconv.Atoi(matches[3])
+			}
+			return normalizeHourForPeriod(hour, period), minute
+		},
+	})
+
 	// 1. 每天带分钟: "每天9点30分提醒我锻炼"（更具体，放在前面）
 	p.patterns = append(p.patterns, &ReminderPattern{
 		Pattern: regexp.MustCompile(`每天.*?(\d+)点(\d+)分.*?提醒我(.+)`),
@@ -145,7 +164,8 @@ func (p *RegexParser) Parse(ctx context.Context, userID string, message string) 
 // buildParseResult 构建解析结果
 func (p *RegexParser) buildParseResult(matches []string, pattern *ReminderPattern) *ai.ParseResult {
 	// 提取标题（最后一个捕获组通常是提醒内容）
-	title := matches[len(matches)-1]
+	title := strings.TrimSpace(matches[len(matches)-1])
+	title = strings.Trim(title, "。.!！?？ ")
 
 	// 生成时间信息
 	hour, minute := pattern.TimeGen(matches)
@@ -199,4 +219,42 @@ func parseWeekday(weekday string) int {
 		return day
 	}
 	return 1 // 默认周一
+}
+
+func normalizeHourForPeriod(hour int, period string) int {
+	if hour < 0 || hour > 23 {
+		return hour
+	}
+
+	p := strings.TrimSpace(period)
+	if p == "" {
+		return hour
+	}
+
+	switch {
+	case strings.Contains(p, "下午"), strings.Contains(p, "午后"):
+		if hour < 12 {
+			return hour + 12
+		}
+	case strings.Contains(p, "晚上"):
+		if hour < 12 {
+			return hour + 12
+		}
+	case strings.Contains(p, "中午"):
+		if hour == 0 {
+			return 12
+		}
+		if hour < 11 {
+			return hour + 12
+		}
+	case strings.Contains(p, "上午"):
+		if hour == 12 {
+			return 0
+		}
+	case strings.Contains(p, "早上"), strings.Contains(p, "早晨"):
+		if hour == 12 {
+			return 0
+		}
+	}
+	return hour
 }

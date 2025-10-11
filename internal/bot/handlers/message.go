@@ -3,6 +3,8 @@ package handlers
 import (
 	"context"
 	"fmt"
+	"sort"
+	"strconv"
 	"strings"
 	"time"
 
@@ -12,6 +14,7 @@ import (
 	"mmemory/internal/service"
 	"mmemory/pkg/ai"
 	"mmemory/pkg/logger"
+	"mmemory/pkg/version"
 )
 
 type MessageHandler struct {
@@ -20,7 +23,7 @@ type MessageHandler struct {
 	reminderLogService service.ReminderLogService
 
 	// AI服务（可选，用于智能解析和对话）
-	aiParserService    service.AIParserService
+	aiParserService     service.AIParserService
 	conversationService service.ConversationService
 }
 
@@ -66,6 +69,10 @@ func (h *MessageHandler) handleCommand(ctx context.Context, bot *tgbotapi.BotAPI
 		return h.handleListCommand(ctx, bot, message, user)
 	case "stats":
 		return h.handleStatsCommand(ctx, bot, message, user)
+	case "delete", "cancel":
+		return h.handleDeleteCommand(ctx, bot, message, user)
+	case "version":
+		return h.handleVersionCommand(bot, message)
 	default:
 		return h.sendMessage(bot, message.Chat.ID, "未知命令，请输入 /help 查看帮助")
 	}
@@ -104,10 +111,35 @@ func (h *MessageHandler) handleHelpCommand(bot *tgbotapi.BotAPI, message *tgbota
 • /start - 重新开始
 • /help - 查看帮助
 • /stats - 查看统计数据
+• /version - 查看版本信息
 
 💡 直接发送文字消息即可创建提醒，我会智能识别你的需求！`
 
 	return h.sendMessage(bot, message.Chat.ID, helpText)
+}
+
+func (h *MessageHandler) handleVersionCommand(bot *tgbotapi.BotAPI, message *tgbotapi.Message) error {
+	versionInfo := version.GetInfo()
+
+	versionText := fmt.Sprintf(`ℹ️ <b>MMemory 版本信息</b>
+
+<b>版本:</b> %s
+<b>Git提交:</b> <code>%s</code>
+<b>Git分支:</b> <code>%s</code>
+<b>构建时间:</b> %s
+<b>Go版本:</b> %s
+<b>运行平台:</b> %s
+
+🚀 <i>MMemory - 你的智能提醒助手</i>`,
+		versionInfo.Version,
+		versionInfo.GitCommit,
+		versionInfo.GitBranch,
+		version.FormatBuildTime(),
+		versionInfo.GoVersion,
+		versionInfo.Platform,
+	)
+
+	return h.sendMessage(bot, message.Chat.ID, versionText)
 }
 
 func (h *MessageHandler) handleListCommand(ctx context.Context, bot *tgbotapi.BotAPI, message *tgbotapi.Message, user *models.User) error {
@@ -123,13 +155,17 @@ func (h *MessageHandler) handleListCommand(ctx context.Context, bot *tgbotapi.Bo
 
 	// 构建提醒列表消息
 	listText := "📋 <b>你的提醒列表</b>\n\n"
-	
+
+	var keyboardRows [][]tgbotapi.InlineKeyboardButton
 	activeCount := 0
 	for _, reminder := range reminders {
 		if !reminder.IsActive {
-			continue
+			// 非活跃但仍处于暂停状态的提醒也展示，便于恢复
+			if !reminder.IsPaused() {
+				continue
+			}
 		}
-		
+
 		activeCount++
 		// 提醒类型图标
 		typeIcon := "🔔"
@@ -138,24 +174,52 @@ func (h *MessageHandler) handleListCommand(ctx context.Context, bot *tgbotapi.Bo
 		} else if reminder.Type == models.ReminderTypeTask {
 			typeIcon = "📋"
 		}
-		
+
 		// 状态图标
 		statusIcon := "✅"
 		statusText := "活跃中"
-		
-		listText += fmt.Sprintf("<b>%d.</b> %s <i>%s</i>\n", activeCount, typeIcon, reminder.Title)
+		actionButton := tgbotapi.NewInlineKeyboardButtonData(
+			fmt.Sprintf("⏸️ 暂停 #%d", reminder.ID),
+			fmt.Sprintf("reminder_pause_%d", reminder.ID),
+		)
+
+		if reminder.IsPaused() {
+			statusIcon = "⏸️"
+			statusText = "已暂停"
+			actionButton = tgbotapi.NewInlineKeyboardButtonData(
+				fmt.Sprintf("▶️ 恢复 #%d", reminder.ID),
+				fmt.Sprintf("reminder_resume_%d", reminder.ID),
+			)
+		}
+
+		listText += fmt.Sprintf("<b>#%d</b> %s <i>%s</i>\n", reminder.ID, typeIcon, reminder.Title)
 		listText += fmt.Sprintf("    ⏰ %s\n", h.formatSchedule(reminder))
 		listText += fmt.Sprintf("    📊 %s %s\n\n", statusIcon, statusText)
+
+		row := []tgbotapi.InlineKeyboardButton{
+			tgbotapi.NewInlineKeyboardButtonData(
+				fmt.Sprintf("❌ 删除 #%d", reminder.ID),
+				fmt.Sprintf("reminder_delete_%d", reminder.ID),
+			),
+			actionButton,
+		}
+		keyboardRows = append(keyboardRows, row)
 	}
-	
+
 	if activeCount == 0 {
 		return h.sendMessage(bot, message.Chat.ID, "📋 你目前没有活跃的提醒\n\n💡 试试对我说：\"每天19点提醒我复盘工作\"")
 	}
-	
-	listText += fmt.Sprintf("🔢 共有 <b>%d</b> 个活跃提醒\n", activeCount)
-	listText += "\n💡 <i>回复提醒消息时可以选择完成、延期或跳过</i>"
 
-	return h.sendMessage(bot, message.Chat.ID, listText)
+	listText += fmt.Sprintf("🔢 共有 <b>%d</b> 个活跃提醒\n", activeCount)
+	listText += "\n💡 <i>点击下方按钮快速删除提醒，或回复提示消息进行操作</i>"
+
+	msg := tgbotapi.NewMessage(message.Chat.ID, listText)
+	msg.ParseMode = tgbotapi.ModeHTML
+	if len(keyboardRows) > 0 {
+		msg.ReplyMarkup = tgbotapi.NewInlineKeyboardMarkup(keyboardRows...)
+	}
+	_, err = bot.Send(msg)
+	return err
 }
 
 func (h *MessageHandler) handleStatsCommand(ctx context.Context, bot *tgbotapi.BotAPI, message *tgbotapi.Message, user *models.User) error {
@@ -166,24 +230,24 @@ func (h *MessageHandler) handleStatsCommand(ctx context.Context, bot *tgbotapi.B
 	}
 
 	statsText := "📊 <b>你的使用统计</b>\n\n"
-	
+
 	// 基础统计
 	statsText += fmt.Sprintf("📝 <b>提醒总数:</b> %d 个\n", stats.TotalReminders)
 	statsText += fmt.Sprintf("✅ <b>活跃提醒:</b> %d 个\n\n", stats.ActiveReminders)
-	
+
 	// 今日统计
 	statsText += "📅 <b>今日数据:</b>\n"
 	statsText += fmt.Sprintf("  ✅ 完成: %d 个\n", stats.CompletedToday)
 	statsText += fmt.Sprintf("  😴 跳过: %d 个\n\n", stats.SkippedToday)
-	
+
 	// 本周统计
 	statsText += "📆 <b>本周数据:</b>\n"
 	statsText += fmt.Sprintf("  ✅ 完成: %d 个\n\n", stats.CompletedWeek)
-	
+
 	// 本月统计
 	statsText += "📈 <b>本月数据:</b>\n"
 	statsText += fmt.Sprintf("  ✅ 完成: %d 个\n", stats.CompletedMonth)
-	
+
 	// 完成率
 	if stats.CompletionRate > 0 {
 		rateEmoji := "📊"
@@ -196,7 +260,7 @@ func (h *MessageHandler) handleStatsCommand(ctx context.Context, bot *tgbotapi.B
 	} else {
 		statsText += "  📊 完成率: 暂无数据\n\n"
 	}
-	
+
 	// 鼓励信息
 	if stats.CompletedToday > 0 {
 		statsText += "🌟 <i>今天做得很棒！继续保持！</i>"
@@ -245,6 +309,14 @@ func (h *MessageHandler) handleWithAI(ctx context.Context, bot *tgbotapi.BotAPI,
 	switch parseResult.Intent {
 	case ai.IntentReminder:
 		return h.handleReminderIntent(ctx, bot, message, user, parseResult)
+	case ai.IntentDelete:
+		return h.handleDeleteIntent(ctx, bot, message, user, parseResult)
+	case ai.IntentEdit:
+		return h.handleEditIntent(ctx, bot, message, user, parseResult)
+	case ai.IntentPause:
+		return h.handlePauseIntent(ctx, bot, message, user, parseResult)
+	case ai.IntentResume:
+		return h.handleResumeIntent(ctx, bot, message, user, parseResult)
 	case ai.IntentChat:
 		return h.handleChatIntent(ctx, bot, message, user, parseResult)
 	case ai.IntentSummary:
@@ -329,6 +401,184 @@ func (h *MessageHandler) handleReminderIntent(ctx context.Context, bot *tgbotapi
 	return h.sendMessage(bot, message.Chat.ID, successText)
 }
 
+// handleDeleteIntent 处理删除意图
+func (h *MessageHandler) handleDeleteIntent(ctx context.Context, bot *tgbotapi.BotAPI, message *tgbotapi.Message, user *models.User, parseResult *ai.ParseResult) error {
+	if parseResult.Delete == nil {
+		return h.sendMessage(bot, message.Chat.ID, "❓ 你想删除哪个提醒呢？请描述提醒的名称或时间。")
+	}
+
+	keywords := filterKeywords(parseResult.Delete.Keywords)
+	if len(keywords) == 0 && strings.TrimSpace(parseResult.Delete.Criteria) != "" {
+		keywords = filterKeywords(strings.Split(parseResult.Delete.Criteria, " "))
+	}
+	if len(keywords) == 0 {
+		return h.sendMessage(bot, message.Chat.ID, "❓ 我需要一些关键词来定位提醒，例如：\"删除今晚的健身提醒\"。")
+	}
+
+	reminders, err := h.reminderService.GetUserReminders(ctx, user.ID)
+	if err != nil {
+		logger.Errorf("获取用户提醒失败: %v", err)
+		return h.sendErrorMessage(bot, message.Chat.ID, "获取提醒列表失败，请稍后再试")
+	}
+
+	matches := matchReminders(reminders, keywords)
+	if len(matches) == 0 {
+		return h.sendMessage(bot, message.Chat.ID,
+			fmt.Sprintf("🔍 没找到包含关键词 [%s] 的提醒。\n\n💡 你可以用 /list 查看全部提醒。", strings.Join(keywords, ", ")))
+	}
+
+	if len(matches) > 1 {
+		text := "🔍 找到多个可能的提醒，请更具体一些：\n\n"
+		for i, match := range matches {
+			text += fmt.Sprintf("%d. #%d %s\n    ⏰ %s\n", i+1, match.reminder.ID, match.reminder.Title, h.formatSchedule(match.reminder))
+		}
+		text += "\n💡 你可以说：\"删除" + matches[0].reminder.Title + "\" 或使用 /delete <ID>"
+		return h.sendMessage(bot, message.Chat.ID, text)
+	}
+
+	target := matches[0].reminder
+	if err := h.reminderService.DeleteReminder(ctx, target.ID); err != nil {
+		logger.Errorf("删除提醒失败: %v", err)
+		return h.sendErrorMessage(bot, message.Chat.ID, "删除提醒失败，请稍后再试")
+	}
+
+	success := fmt.Sprintf("✅ 已删除提醒\n\n📝 %s\n⏰ %s", target.Title, h.formatSchedule(target))
+	return h.sendMessage(bot, message.Chat.ID, success)
+}
+
+// handleEditIntent 处理编辑意图（预留）
+func (h *MessageHandler) handleEditIntent(ctx context.Context, bot *tgbotapi.BotAPI, message *tgbotapi.Message, user *models.User, parseResult *ai.ParseResult) error {
+	if parseResult.Edit == nil {
+		return h.sendMessage(bot, message.Chat.ID, "❓ 你想修改哪个提醒？请提供提醒名称或时间。")
+	}
+
+	keywords := filterKeywords(parseResult.Edit.Keywords)
+	if len(keywords) == 0 {
+		return h.sendMessage(bot, message.Chat.ID, "❓ 需要提醒关键词才能帮你修改哦，例如：\"修改健身提醒到晚上7点\"。")
+	}
+
+	preview := "🛠️ 已理解你的修改请求：\n"
+	preview += fmt.Sprintf("• 目标提醒关键词：%s\n", strings.Join(keywords, "、"))
+	if parseResult.Edit.NewTime != nil {
+		preview += fmt.Sprintf("• 新时间：%02d:%02d\n", parseResult.Edit.NewTime.Hour, parseResult.Edit.NewTime.Minute)
+	}
+	if parseResult.Edit.NewPattern != "" {
+		preview += fmt.Sprintf("• 新重复模式：%s\n", parseResult.Edit.NewPattern)
+	}
+	if parseResult.Edit.NewTitle != "" {
+		preview += fmt.Sprintf("• 新标题：%s\n", parseResult.Edit.NewTitle)
+	}
+
+	preview += "\n⚠️ 修改功能正在建设中，请暂时使用 /list + /delete + 重新创建 来调整提醒。"
+	return h.sendMessage(bot, message.Chat.ID, preview)
+}
+
+// handlePauseIntent 处理暂停意图（预留）
+func (h *MessageHandler) handlePauseIntent(ctx context.Context, bot *tgbotapi.BotAPI, message *tgbotapi.Message, user *models.User, parseResult *ai.ParseResult) error {
+	if parseResult.Pause == nil {
+		return h.sendMessage(bot, message.Chat.ID, "❓ 需要告诉我要暂停哪个提醒，以及暂停多久哦。")
+	}
+
+	keywords := filterKeywords(parseResult.Pause.Keywords)
+	if len(keywords) == 0 {
+		return h.sendMessage(bot, message.Chat.ID, "❓ 请提供提醒的关键词，例如：\"暂停一周的健身提醒\"。")
+	}
+
+	reminders, err := h.reminderService.GetUserReminders(ctx, user.ID)
+	if err != nil {
+		logger.Errorf("获取用户提醒失败: %v", err)
+		return h.sendErrorMessage(bot, message.Chat.ID, "获取提醒列表失败，请稍后再试")
+	}
+
+	matches := matchReminders(reminders, keywords)
+	if len(matches) == 0 {
+		return h.sendMessage(bot, message.Chat.ID,
+			fmt.Sprintf("🔍 没有找到包含关键词 [%s] 的提醒。\n\n💡 可以用 /list 查看全部提醒。", strings.Join(keywords, ", ")))
+	}
+	if len(matches) > 1 {
+		text := "🔍 找到多个提醒，请更具体一些：\n\n"
+		for i, match := range matches {
+			text += fmt.Sprintf("%d. #%d %s\n    ⏰ %s\n", i+1, match.reminder.ID, match.reminder.Title, h.formatSchedule(match.reminder))
+		}
+		text += "\n💡 试试：\"暂停健身提醒一周\" 或者使用 /list 按钮操作。"
+		return h.sendMessage(bot, message.Chat.ID, text)
+	}
+
+	duration := parsePauseDuration(parseResult.Pause.Duration)
+	if duration <= 0 {
+		duration = 7 * 24 * time.Hour
+	}
+
+	target := matches[0].reminder
+	if err := h.reminderService.PauseReminder(ctx, target.ID, duration, parseResult.Pause.Reason); err != nil {
+		logger.Errorf("暂停提醒失败: %v", err)
+		return h.sendErrorMessage(bot, message.Chat.ID, "暂停提醒失败，请稍后再试")
+	}
+
+	updated, _ := h.reminderService.GetReminderByID(ctx, target.ID)
+	var untilText string
+	if updated != nil && updated.PausedUntil != nil {
+		untilText = updated.PausedUntil.In(time.Now().Location()).Format("2006-01-02 15:04")
+	} else {
+		untilText = time.Now().Add(duration).Format("2006-01-02 15:04")
+	}
+
+	response := fmt.Sprintf("⏸️ 已暂停提醒\n\n📝 %s\n⏳ 暂停至 %s",
+		target.Title, untilText)
+	if reason := strings.TrimSpace(parseResult.Pause.Reason); reason != "" {
+		response += fmt.Sprintf("\n💬 理由：%s", reason)
+	}
+	response += "\n\n▶️ 想恢复时可以说：\"恢复" + target.Title + "\" 或使用 /list 按钮。"
+
+	return h.sendMessage(bot, message.Chat.ID, response)
+}
+
+// handleResumeIntent 处理恢复意图（预留）
+func (h *MessageHandler) handleResumeIntent(ctx context.Context, bot *tgbotapi.BotAPI, message *tgbotapi.Message, user *models.User, parseResult *ai.ParseResult) error {
+	if parseResult.Resume == nil {
+		return h.sendMessage(bot, message.Chat.ID, "❓ 请告诉我要恢复哪个提醒。")
+	}
+
+	keywords := filterKeywords(parseResult.Resume.Keywords)
+	if len(keywords) == 0 {
+		return h.sendMessage(bot, message.Chat.ID, "❓ 请提供提醒的关键词，例如：\"恢复健身提醒\"。")
+	}
+
+	reminders, err := h.reminderService.GetUserReminders(ctx, user.ID)
+	if err != nil {
+		logger.Errorf("获取用户提醒失败: %v", err)
+		return h.sendErrorMessage(bot, message.Chat.ID, "获取提醒列表失败，请稍后再试")
+	}
+
+	matches := matchReminders(reminders, keywords)
+	if len(matches) == 0 {
+		return h.sendMessage(bot, message.Chat.ID,
+			fmt.Sprintf("🔍 没有找到包含关键词 [%s] 的提醒。\n\n💡 可以用 /list 查看全部提醒。", strings.Join(keywords, ", ")))
+	}
+	if len(matches) > 1 {
+		text := "🔍 找到多个提醒，请更具体一些：\n\n"
+		for i, match := range matches {
+			text += fmt.Sprintf("%d. #%d %s\n    ⏰ %s\n", i+1, match.reminder.ID, match.reminder.Title, h.formatSchedule(match.reminder))
+		}
+		text += "\n💡 试试：\"恢复每天的喝水提醒\"。"
+		return h.sendMessage(bot, message.Chat.ID, text)
+	}
+
+	target := matches[0].reminder
+	if err := h.reminderService.ResumeReminder(ctx, target.ID); err != nil {
+		logger.Errorf("恢复提醒失败: %v", err)
+		return h.sendErrorMessage(bot, message.Chat.ID, "恢复提醒失败，请稍后再试")
+	}
+
+	updated, _ := h.reminderService.GetReminderByID(ctx, target.ID)
+	if updated != nil {
+		target = updated
+	}
+
+	response := fmt.Sprintf("▶️ 已恢复提醒\n\n📝 %s\n⏰ %s", target.Title, h.formatSchedule(target))
+	return h.sendMessage(bot, message.Chat.ID, response)
+}
+
 // handleChatIntent 处理对话意图
 func (h *MessageHandler) handleChatIntent(ctx context.Context, bot *tgbotapi.BotAPI, message *tgbotapi.Message, user *models.User, parseResult *ai.ParseResult) error {
 	if parseResult.ChatResponse == nil || parseResult.ChatResponse.Response == "" {
@@ -367,6 +617,163 @@ func (h *MessageHandler) handleChatIntent(ctx context.Context, bot *tgbotapi.Bot
 
 	// 发送AI的回复
 	return h.sendMessage(bot, message.Chat.ID, parseResult.ChatResponse.Response)
+}
+
+type reminderMatch struct {
+	reminder *models.Reminder
+	score    int
+}
+
+func matchReminders(reminders []*models.Reminder, keywords []string) []reminderMatch {
+	if len(keywords) == 0 {
+		return nil
+	}
+
+	var matches []reminderMatch
+	for _, reminder := range reminders {
+		if reminder == nil || !reminder.IsActive {
+			continue
+		}
+
+		title := strings.ToLower(reminder.Title)
+		desc := strings.ToLower(reminder.Description)
+
+		score := 0
+		for _, keyword := range keywords {
+			kw := strings.ToLower(keyword)
+			if kw == "" {
+				continue
+			}
+			if strings.Contains(title, kw) || strings.Contains(desc, kw) {
+				score++
+			}
+		}
+
+		if score > 0 {
+			matches = append(matches, reminderMatch{
+				reminder: reminder,
+				score:    score,
+			})
+		}
+	}
+
+	sort.Slice(matches, func(i, j int) bool {
+		if matches[i].score == matches[j].score {
+			return matches[i].reminder.ID < matches[j].reminder.ID
+		}
+		return matches[i].score > matches[j].score
+	})
+
+	return matches
+}
+
+func filterKeywords(keywords []string) []string {
+	var result []string
+	for _, keyword := range keywords {
+		kw := strings.TrimSpace(keyword)
+		if kw != "" {
+			result = append(result, kw)
+		}
+	}
+	return result
+}
+
+func parsePauseDuration(raw string) time.Duration {
+	if strings.TrimSpace(raw) == "" {
+		return 7 * 24 * time.Hour
+	}
+
+	s := strings.TrimSpace(strings.ToLower(raw))
+
+	parseByUnit := func(value int, unit rune) time.Duration {
+		switch unit {
+		case 'w':
+			return time.Duration(value) * 7 * 24 * time.Hour
+		case 'd':
+			return time.Duration(value) * 24 * time.Hour
+		case 'h':
+			return time.Duration(value) * time.Hour
+		case 'm':
+			return time.Duration(value) * 30 * 24 * time.Hour
+		default:
+			return time.Duration(value) * 24 * time.Hour
+		}
+	}
+
+	extractValue := func(str string) int {
+		digits := ""
+		for _, r := range str {
+			if r >= '0' && r <= '9' {
+				digits += string(r)
+			}
+		}
+		if digits == "" {
+			return 1
+		}
+		value, err := strconv.Atoi(digits)
+		if err != nil || value <= 0 {
+			return 1
+		}
+		return value
+	}
+
+	if strings.HasPrefix(s, "p") {
+		s = strings.TrimPrefix(s, "p")
+		if len(s) >= 2 {
+			value := extractValue(s[:len(s)-1])
+			unit := rune(s[len(s)-1])
+			return parseByUnit(value, unit)
+		}
+	}
+
+	switch {
+	case strings.Contains(s, "week") || strings.Contains(s, "周"):
+		return parseByUnit(extractValue(s), 'w')
+	case strings.Contains(s, "month") || strings.Contains(s, "月"):
+		return parseByUnit(extractValue(s), 'm')
+	case strings.Contains(s, "day") || strings.Contains(s, "天"):
+		return parseByUnit(extractValue(s), 'd')
+	case strings.Contains(s, "hour") || strings.Contains(s, "小时"):
+		return parseByUnit(extractValue(s), 'h')
+	default:
+		return 7 * 24 * time.Hour
+	}
+}
+
+func (h *MessageHandler) handleDeleteCommand(ctx context.Context, bot *tgbotapi.BotAPI, message *tgbotapi.Message, user *models.User) error {
+	args := strings.TrimSpace(message.CommandArguments())
+	if args == "" {
+		return h.sendMessage(bot, message.Chat.ID,
+			"❓ 请指定要删除的提醒ID\n\n"+
+				"用法：/delete <ID>\n"+
+				"示例：/delete 3\n\n"+
+				"💡 使用 /list 查看所有提醒及其ID")
+	}
+
+	reminderID, err := strconv.ParseUint(args, 10, 64)
+	if err != nil {
+		return h.sendMessage(bot, message.Chat.ID, "❌ 无效的提醒ID，请输入数字")
+	}
+
+	reminder, err := h.reminderService.GetReminderByID(ctx, uint(reminderID))
+	if err != nil {
+		logger.Errorf("获取提醒失败: %v", err)
+		return h.sendErrorMessage(bot, message.Chat.ID, "获取提醒失败，请稍后再试")
+	}
+	if reminder == nil {
+		return h.sendMessage(bot, message.Chat.ID, fmt.Sprintf("❌ 未找到ID为 %d 的提醒", reminderID))
+	}
+	if reminder.UserID != user.ID {
+		return h.sendMessage(bot, message.Chat.ID, "❌ 你没有权限删除此提醒")
+	}
+
+	if err := h.reminderService.DeleteReminder(ctx, reminder.ID); err != nil {
+		logger.Errorf("删除提醒失败: %v", err)
+		return h.sendErrorMessage(bot, message.Chat.ID, "删除提醒失败，请稍后再试")
+	}
+
+	return h.sendMessage(bot, message.Chat.ID,
+		fmt.Sprintf("✅ 已删除提醒\n\n📝 %s\n⏰ %s", reminder.Title, h.formatSchedule(reminder)))
 }
 
 // handleSummaryIntent 处理总结意图
@@ -475,10 +882,10 @@ func (h *MessageHandler) formatSchedule(reminder *models.Reminder) string {
 	case reminder.IsWeekly():
 		// 解析周几
 		weekdayMap := map[string]string{
-			"1": "周一", "2": "周二", "3": "周三", "4": "周四", 
+			"1": "周一", "2": "周二", "3": "周三", "4": "周四",
 			"5": "周五", "6": "周六", "7": "周日",
 		}
-		
+
 		pattern := reminder.SchedulePattern
 		if len(pattern) > 7 && pattern[:7] == "weekly:" {
 			weekdaysStr := pattern[7:]
@@ -497,8 +904,8 @@ func (h *MessageHandler) formatSchedule(reminder *models.Reminder) string {
 	case reminder.IsOnce():
 		// 解析日期
 		pattern := reminder.SchedulePattern
-		if len(pattern) > 5 && pattern[:5] == "once:" {
-			dateStr := pattern[5:]
+		if strings.HasPrefix(pattern, string(models.SchedulePatternOnce)) {
+			dateStr := strings.TrimPrefix(pattern, string(models.SchedulePatternOnce))
 			return fmt.Sprintf("%s %s", dateStr, reminder.TargetTime[:5])
 		}
 		return fmt.Sprintf("一次性提醒 %s", reminder.TargetTime[:5])

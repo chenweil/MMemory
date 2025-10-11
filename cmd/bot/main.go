@@ -20,12 +20,13 @@ import (
 	"mmemory/pkg/config"
 	"mmemory/pkg/logger"
 	"mmemory/pkg/server"
+	"mmemory/pkg/version"
 )
 
 func main() {
 	// 创建配置管理器
 	configManager := config.NewConfigManager()
-	
+
 	// 加载配置
 	cfg, err := configManager.Load()
 	if err != nil {
@@ -37,11 +38,16 @@ func main() {
 		log.Fatalf("初始化日志失败: %v", err)
 	}
 
-	logger.Infof("🚀 启动 %s %s", cfg.App.Name, cfg.App.Version)
-	
+	// 打印版本信息
+	versionInfo := version.GetInfo()
+	logger.Infof("🚀 启动 %s %s", cfg.App.Name, version.GetVersionString())
+	logger.Infof("📦 版本详情: Git=%s, Branch=%s, BuildTime=%s",
+		versionInfo.GitCommit, versionInfo.GitBranch, version.FormatBuildTime())
+	logger.Infof("🖥️  运行环境: %s (%s)", versionInfo.Platform, versionInfo.GoVersion)
+
 	// 创建热更新管理器
 	hotReloadManager := config.NewHotReloadManager(configManager)
-	
+
 	// 注册配置变更监听器
 	setupConfigListeners(configManager, hotReloadManager)
 
@@ -132,7 +138,9 @@ func main() {
 	}
 
 	// 建立服务之间的依赖关系
-	if reminderServiceWithScheduler, ok := reminderService.(interface{ SetScheduler(service.SchedulerService) }); ok {
+	if reminderServiceWithScheduler, ok := reminderService.(interface {
+		SetScheduler(service.SchedulerService)
+	}); ok {
 		reminderServiceWithScheduler.SetScheduler(schedulerService)
 	}
 
@@ -140,7 +148,7 @@ func main() {
 	var metricsServer *server.MetricsServer
 	var monitoringCtx context.Context
 	var monitoringCancel context.CancelFunc
-	
+
 	if cfg.Monitoring.Enabled {
 		metricsServer = server.NewMetricsServer(cfg.Monitoring.Port)
 		if err := metricsServer.Start(); err != nil {
@@ -156,7 +164,7 @@ func main() {
 
 	// 初始化消息处理器
 	messageHandler := handlers.NewMessageHandler(reminderService, userService, reminderLogService, aiParserService, conversationService)
-	callbackHandler := handlers.NewCallbackHandler(reminderLogService, schedulerService)
+	callbackHandler := handlers.NewCallbackHandler(reminderService, reminderLogService, schedulerService)
 
 	// 启动调度器
 	if err := schedulerService.Start(); err != nil {
@@ -177,13 +185,13 @@ func main() {
 	go func() {
 		<-sigChan
 		logger.Info("🔄 收到停止信号，正在关闭...")
-		
+
 		// 停止热更新管理器
 		if hotReloadManager != nil {
 			hotReloadManager.Stop()
 			logger.Info("配置热更新管理器已停止")
 		}
-		
+
 		// 停止监控服务
 		if cfg.Monitoring.Enabled {
 			if monitoringCancel != nil {
@@ -196,7 +204,7 @@ func main() {
 				metricsServer.Stop(context.Background())
 			}
 		}
-		
+
 		cancel()
 	}()
 
@@ -211,14 +219,14 @@ func main() {
 // setupConfigListeners 设置配置变更监听器
 func setupConfigListeners(configManager *config.ConfigManager, hotReloadManager *config.HotReloadManager) {
 	ctx := context.Background()
-	
+
 	// 启动热更新管理器
 	if err := hotReloadManager.Start(ctx); err != nil {
 		logger.Warnf("启动配置热更新失败: %v", err)
 	} else {
 		logger.Info("配置热更新管理器已启动")
 	}
-	
+
 	// 注册日志配置监听器
 	loggingListener := config.NewLoggingConfigListener(func(level, format, output, filePath string) {
 		logger.Infof("检测到日志配置变更，重新初始化日志系统")
@@ -229,25 +237,25 @@ func setupConfigListeners(configManager *config.ConfigManager, hotReloadManager 
 		}
 	})
 	configManager.AddWatcher(loggingListener)
-	
+
 	// 注册数据库配置监听器（安全重载）
 	hotReloadManager.RegisterSafeReloadFunc("database", func(newConfig *config.Config) error {
-		logger.Infof("检测到数据库配置变更，连接池参数更新: max_open_conns=%d, max_idle_conns=%d", 
+		logger.Infof("检测到数据库配置变更，连接池参数更新: max_open_conns=%d, max_idle_conns=%d",
 			newConfig.Database.MaxOpenConns, newConfig.Database.MaxIdleConns)
 		// 这里可以添加数据库连接池的动态调整逻辑
 		return nil
 	})
-	
+
 	// 注册Bot配置监听器
 	botListener := config.NewBotConfigListener(func(debug bool) {
 		logger.Infof("检测到Bot配置变更，调试模式: %v", debug)
 		// 这里可以添加Bot调试模式的动态调整逻辑
 	})
 	configManager.AddWatcher(botListener)
-	
+
 	// 注册通用的重载回调
 	configManager.OnReload(func(newConfig *config.Config) {
-		logger.Infof("配置重载完成，当前版本: %s, 环境: %s", 
+		logger.Infof("配置重载完成，当前版本: %s, 环境: %s",
 			newConfig.App.Version, newConfig.App.Environment)
 	})
 }
@@ -258,7 +266,7 @@ func isEOFError(err error) bool {
 		return false
 	}
 	errStr := err.Error()
-	return strings.Contains(errStr, "EOF") || 
+	return strings.Contains(errStr, "EOF") ||
 		strings.Contains(errStr, "unexpected EOF") ||
 		strings.Contains(errStr, "connection reset") ||
 		strings.Contains(errStr, "broken pipe")
@@ -278,14 +286,14 @@ func startBot(ctx context.Context, bot *tgbotapi.BotAPI, messageHandler *handler
 
 	maxRetries := 3
 	retryDelay := 5 * time.Second
-	
+
 	for {
 		select {
 		case <-ctx.Done():
 			logger.Info("停止接收消息")
 			bot.StopReceivingUpdates()
 			return nil
-			
+
 		default:
 			if err := runUpdatesWithRetry(ctx, bot, messageHandler, callbackHandler, maxRetries, retryDelay); err != nil {
 				logger.Errorf("Bot运行失败，即将重试: %v", err)
@@ -310,7 +318,7 @@ func runUpdatesWithRetry(ctx context.Context, bot *tgbotapi.BotAPI, messageHandl
 func processUpdates(ctx context.Context, updates tgbotapi.UpdatesChannel, bot *tgbotapi.BotAPI, messageHandler *handlers.MessageHandler, callbackHandler *handlers.CallbackHandler) error {
 	consecutiveErrors := 0
 	maxConsecutiveErrors := 10
-	
+
 	for {
 		select {
 		case <-ctx.Done():
@@ -321,10 +329,10 @@ func processUpdates(ctx context.Context, updates tgbotapi.UpdatesChannel, bot *t
 			if !ok {
 				return fmt.Errorf("更新通道已关闭")
 			}
-			
+
 			// 重置连续错误计数
 			consecutiveErrors = 0
-			
+
 			// 处理消息
 			if update.Message != nil {
 				go func(msg *tgbotapi.Message) {
@@ -342,12 +350,12 @@ func processUpdates(ctx context.Context, updates tgbotapi.UpdatesChannel, bot *t
 					}
 				}(update.CallbackQuery)
 			}
-			
+
 		case <-time.After(5 * time.Minute):
 			// 5分钟内没有收到任何更新，记录心跳日志
 			logger.Debug("🫀 Bot心跳检测：运行正常，暂无新消息")
 			consecutiveErrors++
-			
+
 			if consecutiveErrors > maxConsecutiveErrors {
 				logger.Warn("连续多次没有收到更新，可能存在连接问题")
 				return fmt.Errorf("连接可能存在问题，需要重新初始化")
@@ -359,7 +367,7 @@ func processUpdates(ctx context.Context, updates tgbotapi.UpdatesChannel, bot *t
 // startOvertimeProcessor 启动超时处理器
 func startOvertimeProcessor(ctx context.Context, reminderLogService service.ReminderLogService, notificationService service.NotificationService) {
 	logger.Info("⏰ 超时处理器启动")
-	
+
 	ticker := time.NewTicker(30 * time.Minute) // 每30分钟检查一次
 	defer ticker.Stop()
 
@@ -387,7 +395,7 @@ func startOvertimeProcessor(ctx context.Context, reminderLogService service.Remi
 				if err := reminderLogService.UpdateFollowUpCount(ctx, log.ID); err != nil {
 					logger.Errorf("更新关怀次数失败 (LogID: %d): %v", log.ID, err)
 				}
-				
+
 				logger.Debugf("💌 已发送关怀消息: LogID=%d, 次数=%d", log.ID, log.FollowUpCount+1)
 			}
 

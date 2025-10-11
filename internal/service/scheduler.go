@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/robfig/cron/v3"
@@ -16,10 +17,13 @@ import (
 
 type schedulerService struct {
 	cron                *cron.Cron
+	location            *time.Location
 	reminderRepo        interfaces.ReminderRepository
 	reminderLogRepo     interfaces.ReminderLogRepository
 	notificationService NotificationService
-	jobs                map[uint]cron.EntryID // reminder_id -> cron_entry_id
+	jobs                map[uint]cron.EntryID
+	onceTimers          map[uint]*time.Timer
+	mu                  sync.RWMutex
 }
 
 func NewSchedulerService(
@@ -29,29 +33,31 @@ func NewSchedulerService(
 ) SchedulerService {
 	// 使用北京时区
 	loc, _ := time.LoadLocation("Asia/Shanghai")
-	
+
 	return &schedulerService{
 		cron:                cron.New(cron.WithLocation(loc)),
+		location:            loc,
 		reminderRepo:        reminderRepo,
 		reminderLogRepo:     reminderLogRepo,
 		notificationService: notificationService,
 		jobs:                make(map[uint]cron.EntryID),
+		onceTimers:          make(map[uint]*time.Timer),
 	}
 }
 
 func (s *schedulerService) Start() error {
 	logger.Info("🕰️ 定时调度器启动中...")
-	
+
 	// 启动cron调度器
 	s.cron.Start()
-	
+
 	// 从数据库恢复所有有效提醒
 	ctx := context.Background()
 	reminders, err := s.reminderRepo.GetActiveReminders(ctx)
 	if err != nil {
 		return fmt.Errorf("获取有效提醒失败: %w", err)
 	}
-	
+
 	// 为每个提醒添加调度任务
 	for _, reminder := range reminders {
 		if err := s.AddReminder(reminder); err != nil {
@@ -59,7 +65,7 @@ func (s *schedulerService) Start() error {
 			continue
 		}
 	}
-	
+
 	logger.Infof("✅ 定时调度器启动成功，已加载 %d 个提醒", len(reminders))
 	return nil
 }
@@ -67,64 +73,99 @@ func (s *schedulerService) Start() error {
 func (s *schedulerService) Stop() error {
 	logger.Info("🔄 定时调度器停止中...")
 	s.cron.Stop()
+	s.mu.Lock()
+	for id, timer := range s.onceTimers {
+		if timer != nil {
+			timer.Stop()
+		}
+		delete(s.onceTimers, id)
+	}
 	s.jobs = make(map[uint]cron.EntryID)
+	s.mu.Unlock()
 	logger.Info("✅ 定时调度器已停止")
 	return nil
 }
 
 func (s *schedulerService) AddReminder(reminder *models.Reminder) error {
+	if reminder == nil {
+		return fmt.Errorf("提醒信息不能为空")
+	}
+
 	if !reminder.IsActive {
 		return fmt.Errorf("提醒未激活，无法添加调度")
 	}
-	
+
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	// 如果存在旧的定时器/任务，先清理
+	s.clearReminderLocked(reminder.ID)
+
+	if reminder.IsPaused() {
+		logger.Debugf("⏸️ 提醒处于暂停状态，跳过调度: ID=%d", reminder.ID)
+		return nil
+	}
+
+	if reminder.IsOnce() {
+		return s.addOnceReminderLocked(reminder)
+	}
+
 	cronExpr, err := s.buildCronExpression(reminder)
 	if err != nil {
 		return fmt.Errorf("构建cron表达式失败: %w", err)
 	}
-	
-	// 添加cron任务
+
 	entryID, err := s.cron.AddFunc(cronExpr, func() {
 		s.executeReminder(reminder.ID)
 	})
 	if err != nil {
 		return fmt.Errorf("添加cron任务失败: %w", err)
 	}
-	
-	// 记录任务ID
+
 	s.jobs[reminder.ID] = entryID
-	
+
 	logger.Debugf("📅 添加提醒调度: ID=%d, Cron=%s", reminder.ID, cronExpr)
 	return nil
 }
 
 func (s *schedulerService) RemoveReminder(reminderID uint) error {
-	entryID, exists := s.jobs[reminderID]
-	if !exists {
-		return fmt.Errorf("提醒调度不存在: %d", reminderID)
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	removed := s.clearReminderLocked(reminderID)
+
+	if removed {
+		logger.Debugf("🗑️ 移除提醒调度: ID=%d", reminderID)
+		return nil
 	}
-	
-	s.cron.Remove(entryID)
-	delete(s.jobs, reminderID)
-	
-	logger.Debugf("🗑️ 移除提醒调度: ID=%d", reminderID)
-	return nil
+
+	return fmt.Errorf("提醒调度不存在: %d", reminderID)
 }
 
 func (s *schedulerService) RefreshSchedules() error {
 	logger.Info("🔄 刷新所有调度任务...")
-	
+
 	// 停止所有现有任务
-	for reminderID := range s.jobs {
-		s.RemoveReminder(reminderID)
+	s.mu.Lock()
+	for id, entry := range s.jobs {
+		s.cron.Remove(entry)
+		delete(s.jobs, id)
 	}
-	
+	for id, timer := range s.onceTimers {
+		if timer != nil {
+			timer.Stop()
+		}
+		delete(s.onceTimers, id)
+	}
+	s.mu.Unlock()
+
 	// 重新加载所有有效提醒
 	ctx := context.Background()
 	reminders, err := s.reminderRepo.GetActiveReminders(ctx)
 	if err != nil {
 		return fmt.Errorf("获取有效提醒失败: %w", err)
 	}
-	
+
 	// 重新添加所有任务
 	for _, reminder := range reminders {
 		if err := s.AddReminder(reminder); err != nil {
@@ -132,8 +173,12 @@ func (s *schedulerService) RefreshSchedules() error {
 			continue
 		}
 	}
-	
-	logger.Infof("✅ 调度任务刷新完成，当前活跃任务: %d", len(s.jobs))
+
+	s.mu.RLock()
+	activeJobs := len(s.jobs) + len(s.onceTimers)
+	s.mu.RUnlock()
+
+	logger.Infof("✅ 调度任务刷新完成，当前活跃任务: %d", activeJobs)
 	return nil
 }
 
@@ -144,36 +189,36 @@ func (s *schedulerService) buildCronExpression(reminder *models.Reminder) (strin
 	if len(timeParts) < 2 {
 		return "", fmt.Errorf("无效的时间格式: %s", reminder.TargetTime)
 	}
-	
+
 	hour, err := strconv.Atoi(timeParts[0])
 	if err != nil {
 		return "", fmt.Errorf("无效的小时: %s", timeParts[0])
 	}
-	
+
 	minute, err := strconv.Atoi(timeParts[1])
 	if err != nil {
 		return "", fmt.Errorf("无效的分钟: %s", timeParts[1])
 	}
-	
+
 	// 根据调度模式构建表达式
 	switch {
 	case reminder.IsDaily():
-		// 每天指定时间：秒 分 时 * * *
-		return fmt.Sprintf("0 %d %d * * *", minute, hour), nil
-		
+		// 每天指定时间：分 时 * * *
+		return fmt.Sprintf("%02d %d * * *", minute, hour), nil
+
 	case reminder.IsWeekly():
 		// 解析星期几
 		weekdays, err := s.parseWeeklyPattern(reminder.SchedulePattern)
 		if err != nil {
 			return "", err
 		}
-		// 每周指定天：秒 分 时 * * 星期
-		return fmt.Sprintf("0 %d %d * * %s", minute, hour, strings.Join(weekdays, ",")), nil
-		
+		// 每周指定天：分 时 * * 星期
+		return fmt.Sprintf("%02d %d * * %s", minute, hour, strings.Join(weekdays, ",")), nil
+
 	case reminder.IsOnce():
 		// 一次性提醒需要特殊处理
 		return s.buildOnceExpression(reminder.SchedulePattern, hour, minute)
-		
+
 	default:
 		return "", fmt.Errorf("不支持的调度模式: %s", reminder.SchedulePattern)
 	}
@@ -184,10 +229,10 @@ func (s *schedulerService) parseWeeklyPattern(pattern string) ([]string, error) 
 	if !strings.HasPrefix(pattern, "weekly:") {
 		return nil, fmt.Errorf("无效的每周模式: %s", pattern)
 	}
-	
+
 	weekdaysStr := strings.TrimPrefix(pattern, "weekly:")
 	weekdays := strings.Split(weekdaysStr, ",")
-	
+
 	// 验证星期数字有效性
 	for _, weekday := range weekdays {
 		day, err := strconv.Atoi(strings.TrimSpace(weekday))
@@ -195,52 +240,119 @@ func (s *schedulerService) parseWeeklyPattern(pattern string) ([]string, error) 
 			return nil, fmt.Errorf("无效的星期数字: %s", weekday)
 		}
 	}
-	
+
 	return weekdays, nil
+}
+
+func (s *schedulerService) addOnceReminderLocked(reminder *models.Reminder) error {
+	timeParts := strings.Split(reminder.TargetTime, ":")
+	if len(timeParts) < 2 {
+		return fmt.Errorf("无效的时间格式: %s", reminder.TargetTime)
+	}
+
+	hour, err := strconv.Atoi(timeParts[0])
+	if err != nil {
+		return fmt.Errorf("无效的小时: %s", timeParts[0])
+	}
+
+	minute, err := strconv.Atoi(timeParts[1])
+	if err != nil {
+		return fmt.Errorf("无效的分钟: %s", timeParts[1])
+	}
+
+	targetTime, err := s.parseOnceTargetTime(reminder.SchedulePattern, hour, minute)
+	if err != nil {
+		return err
+	}
+
+	delay := time.Until(targetTime)
+	if delay <= 0 {
+		return fmt.Errorf("目标时间已过期: %v", targetTime)
+	}
+
+	timer := time.AfterFunc(delay, func() {
+		s.executeReminder(reminder.ID)
+	})
+
+	s.onceTimers[reminder.ID] = timer
+	logger.Debugf("⏰ 一次性提醒定时器已创建: ID=%d, 触发时间=%s", reminder.ID, targetTime.Format(time.RFC3339))
+	return nil
+}
+
+func (s *schedulerService) parseOnceTargetTime(pattern string, hour, minute int) (time.Time, error) {
+	if !strings.HasPrefix(pattern, string(models.SchedulePatternOnce)) {
+		return time.Time{}, fmt.Errorf("无效的一次性模式: %s", pattern)
+	}
+
+	dateStr := strings.TrimPrefix(pattern, string(models.SchedulePatternOnce))
+	loc := s.location
+	if loc == nil {
+		loc = time.Local
+	}
+
+	date, err := time.ParseInLocation("2006-01-02", dateStr, loc)
+	if err != nil {
+		return time.Time{}, fmt.Errorf("无效的日期格式: %s", dateStr)
+	}
+
+	targetTime := time.Date(date.Year(), date.Month(), date.Day(), hour, minute, 0, 0, loc)
+	currentTime := time.Now().In(loc)
+	if !targetTime.After(currentTime) {
+		return time.Time{}, fmt.Errorf("目标时间已过期: %v", targetTime)
+	}
+
+	return targetTime, nil
+}
+
+func (s *schedulerService) clearReminderLocked(reminderID uint) bool {
+	removed := false
+
+	if entryID, exists := s.jobs[reminderID]; exists {
+		s.cron.Remove(entryID)
+		delete(s.jobs, reminderID)
+		removed = true
+	}
+
+	if timer, exists := s.onceTimers[reminderID]; exists {
+		if timer != nil {
+			timer.Stop()
+		}
+		delete(s.onceTimers, reminderID)
+		removed = true
+	}
+
+	return removed
 }
 
 // buildOnceExpression 构建一次性提醒表达式
 func (s *schedulerService) buildOnceExpression(pattern string, hour, minute int) (string, error) {
-	if !strings.HasPrefix(pattern, "once:") {
-		return "", fmt.Errorf("无效的一次性模式: %s", pattern)
-	}
-	
-	dateStr := strings.TrimPrefix(pattern, "once:")
-	
-	// 解析日期
-	date, err := time.Parse("2006-01-02", dateStr)
+	targetTime, err := s.parseOnceTargetTime(pattern, hour, minute)
 	if err != nil {
-		return "", fmt.Errorf("无效的日期格式: %s", dateStr)
+		return "", err
 	}
-	
-	// 检查日期是否在未来
-	targetTime := time.Date(date.Year(), date.Month(), date.Day(), hour, minute, 0, 0, date.Location())
-	if targetTime.Before(time.Now()) {
-		return "", fmt.Errorf("目标时间已过期: %v", targetTime)
-	}
-	
-	// 一次性任务：秒 分 时 日 月 *
-	return fmt.Sprintf("0 %d %d %d %d *", minute, hour, date.Day(), int(date.Month())), nil
+
+	// 一次性任务：分 时 日 月 *
+	return fmt.Sprintf("%02d %d %d %d *", minute, hour, targetTime.Day(), int(targetTime.Month())), nil
 }
 
 // executeReminder 执行提醒任务
 func (s *schedulerService) executeReminder(reminderID uint) {
 	ctx := context.Background()
-	
+
 	logger.Debugf("⏰ 执行提醒任务: ID=%d", reminderID)
-	
+
 	// 获取提醒详情
 	reminder, err := s.reminderRepo.GetByID(ctx, reminderID)
 	if err != nil {
 		logger.Errorf("获取提醒失败 (ID: %d): %v", reminderID, err)
 		return
 	}
-	
+
 	if reminder == nil || !reminder.IsActive {
 		logger.Warnf("提醒不存在或已禁用 (ID: %d)", reminderID)
 		return
 	}
-	
+
 	// 创建提醒记录
 	reminderLog := &models.ReminderLog{
 		ReminderID:    reminderID,
@@ -268,13 +380,13 @@ func (s *schedulerService) executeReminder(reminderID uint) {
 		logger.Errorf("发送提醒通知失败 (ID: %d): %v", reminderID, err)
 		return
 	}
-	
+
 	// 更新提醒记录状态
 	reminderLog.MarkAsSent()
 	if err := s.reminderLogRepo.Update(ctx, reminderLog); err != nil {
 		logger.Errorf("更新提醒记录失败 (ID: %d): %v", reminderID, err)
 	}
-	
+
 	// 如果是一次性提醒，完成后禁用
 	if reminder.IsOnce() {
 		reminder.IsActive = false

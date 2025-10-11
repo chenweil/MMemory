@@ -58,6 +58,10 @@ make docker-logs       # 查看日志
 # 代码质量
 make fmt               # 格式化代码
 make tidy              # 整理依赖
+
+# 版本管理
+make version           # 显示版本信息
+make build VERSION=v1.0.0  # 指定版本号构建
 ```
 
 ### Development (Manual Commands)
@@ -310,10 +314,13 @@ The system includes comprehensive monitoring capabilities:
   - `pkg/logger/`: Logging utilities
   - `pkg/metrics/`: Prometheus metrics
   - `pkg/server/`: HTTP server for metrics
+  - `pkg/version/`: Version information management
 - `configs/`: Configuration files and examples
 - `docs/`: Technical documentation and implementation reports
   - `docs/C1-AI-Parser-Implementation-20250929.md`: AI parser implementation (completed)
   - `docs/C2-AI-Provider-Implementation-20250930.md`: Multi-provider support (planned)
+  - `docs/C3-Critical-Fixes-And-Enhancements-20251010.md`: Critical bug fixes and user interaction enhancements
+  - `docs/version-management.md`: Version information management guide
 - `scripts/`: Build and deployment automation scripts
 - `test/`: Integration and end-to-end tests
 
@@ -334,5 +341,6 @@ The system includes comprehensive monitoring capabilities:
 - **AI Configuration**: Always ensure backup model matches primary for third-party APIs
 - **Prompt Templates**: System auto-fills empty prompts with defaults from `pkg/ai/config.go`
 - **Build Process**: Use Makefile (`make build`) for consistent binary output to `bin/`
+- **Version Management**: Build with version info injection via ldflags, use `/version` command in bot
 - **Testing AI**: Set `OPENAI_API_KEY` or equivalent for integration tests
 - **Docker**: Environment variables from `.env` are auto-loaded by docker-compose
