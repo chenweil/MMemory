@@ -65,6 +65,8 @@ func (h *CallbackHandler) HandleCallback(ctx context.Context, bot *tgbotapi.BotA
 		return h.handleReminderPause(ctx, bot, callback, uint(resourceID))
 	case "resume":
 		return h.handleReminderResume(ctx, bot, callback, uint(resourceID))
+	case "edit":
+		return h.handleReminderEdit(ctx, bot, callback, uint(resourceID))
 	default:
 		return h.sendCallbackResponse(bot, callback.ID, "❌ 未知操作")
 	}
@@ -224,6 +226,56 @@ func (h *CallbackHandler) handleReminderResume(ctx context.Context, bot *tgbotap
 	}
 
 	return h.sendCallbackResponse(bot, callback.ID, "▶️ 已恢复")
+}
+
+func (h *CallbackHandler) handleReminderEdit(ctx context.Context, bot *tgbotapi.BotAPI, callback *tgbotapi.CallbackQuery, reminderID uint) error {
+	if reminderID == 0 {
+		return h.sendCallbackResponse(bot, callback.ID, "❌ 无效的提醒ID")
+	}
+
+	// 获取提醒详情
+	reminder, err := h.reminderService.GetReminderByID(ctx, reminderID)
+	if err != nil {
+		logger.Errorf("获取提醒失败 (ID: %d): %v", reminderID, err)
+		return h.sendCallbackResponse(bot, callback.ID, "❌ 获取提醒失败")
+	}
+	if reminder == nil {
+		return h.sendCallbackResponse(bot, callback.ID, "❌ 提醒不存在")
+	}
+
+	// 构建编辑提示消息
+	editText := fmt.Sprintf(`🛠️ <b>编辑提醒 #%d</b>
+
+<b>当前信息：</b>
+📝 标题：%s
+⏰ 时间：%s
+🔄 模式：%s
+
+<b>如何编辑：</b>
+你可以直接对我说：
+• "修改<b>%s</b>到晚上7点"
+• "把<b>%s</b>改为每周一三五"
+• "把<b>%s</b>的标题改为学习英语"
+
+💡 AI会智能理解你的编辑意图`,
+		reminderID,
+		reminder.Title,
+		reminder.TargetTime[:5],
+		reminder.SchedulePattern,
+		reminder.Title,
+		reminder.Title,
+		reminder.Title,
+	)
+
+	if callback.Message != nil {
+		msg := tgbotapi.NewMessage(callback.Message.Chat.ID, editText)
+		msg.ParseMode = tgbotapi.ModeHTML
+		if _, err := bot.Send(msg); err != nil {
+			logger.Warnf("发送编辑提示失败: %v", err)
+		}
+	}
+
+	return h.sendCallbackResponse(bot, callback.ID, "📝 请通过文字描述你的修改")
 }
 
 func (h *CallbackHandler) sendCallbackResponse(bot *tgbotapi.BotAPI, callbackID, text string) error {

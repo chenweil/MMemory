@@ -196,7 +196,12 @@ func (h *MessageHandler) handleListCommand(ctx context.Context, bot *tgbotapi.Bo
 		listText += fmt.Sprintf("    ⏰ %s\n", h.formatSchedule(reminder))
 		listText += fmt.Sprintf("    📊 %s %s\n\n", statusIcon, statusText)
 
+		// 三个按钮：编辑、删除、暂停/恢复
 		row := []tgbotapi.InlineKeyboardButton{
+			tgbotapi.NewInlineKeyboardButtonData(
+				fmt.Sprintf("✏️ 编辑 #%d", reminder.ID),
+				fmt.Sprintf("reminder_edit_%d", reminder.ID),
+			),
 			tgbotapi.NewInlineKeyboardButtonData(
 				fmt.Sprintf("❌ 删除 #%d", reminder.ID),
 				fmt.Sprintf("reminder_delete_%d", reminder.ID),
@@ -446,7 +451,7 @@ func (h *MessageHandler) handleDeleteIntent(ctx context.Context, bot *tgbotapi.B
 	return h.sendMessage(bot, message.Chat.ID, success)
 }
 
-// handleEditIntent 处理编辑意图（预留）
+// handleEditIntent 处理编辑意图
 func (h *MessageHandler) handleEditIntent(ctx context.Context, bot *tgbotapi.BotAPI, message *tgbotapi.Message, user *models.User, parseResult *ai.ParseResult) error {
 	if parseResult.Edit == nil {
 		return h.sendMessage(bot, message.Chat.ID, "❓ 你想修改哪个提醒？请提供提醒名称或时间。")
@@ -457,20 +462,73 @@ func (h *MessageHandler) handleEditIntent(ctx context.Context, bot *tgbotapi.Bot
 		return h.sendMessage(bot, message.Chat.ID, "❓ 需要提醒关键词才能帮你修改哦，例如：\"修改健身提醒到晚上7点\"。")
 	}
 
-	preview := "🛠️ 已理解你的修改请求：\n"
-	preview += fmt.Sprintf("• 目标提醒关键词：%s\n", strings.Join(keywords, "、"))
-	if parseResult.Edit.NewTime != nil {
-		preview += fmt.Sprintf("• 新时间：%02d:%02d\n", parseResult.Edit.NewTime.Hour, parseResult.Edit.NewTime.Minute)
-	}
-	if parseResult.Edit.NewPattern != "" {
-		preview += fmt.Sprintf("• 新重复模式：%s\n", parseResult.Edit.NewPattern)
-	}
-	if parseResult.Edit.NewTitle != "" {
-		preview += fmt.Sprintf("• 新标题：%s\n", parseResult.Edit.NewTitle)
+	// 1. 查找匹配的提醒
+	reminders, err := h.reminderService.GetUserReminders(ctx, user.ID)
+	if err != nil {
+		logger.Errorf("获取用户提醒失败: %v", err)
+		return h.sendErrorMessage(bot, message.Chat.ID, "获取提醒列表失败，请稍后再试")
 	}
 
-	preview += "\n⚠️ 修改功能正在建设中，请暂时使用 /list + /delete + 重新创建 来调整提醒。"
-	return h.sendMessage(bot, message.Chat.ID, preview)
+	matches := matchReminders(reminders, keywords)
+	if len(matches) == 0 {
+		return h.sendMessage(bot, message.Chat.ID,
+			fmt.Sprintf("🔍 没有找到包含关键词 [%s] 的提醒。\n\n💡 可以用 /list 查看全部提醒。", strings.Join(keywords, ", ")))
+	}
+	if len(matches) > 1 {
+		text := "🔍 找到多个提醒，请更具体一些：\n\n"
+		for i, match := range matches {
+			text += fmt.Sprintf("%d. #%d %s\n    ⏰ %s\n", i+1, match.reminder.ID, match.reminder.Title, h.formatSchedule(match.reminder))
+		}
+		text += "\n💡 试试：\"修改" + matches[0].reminder.Title + "到晚上7点\" 或使用 /list 按钮操作。"
+		return h.sendMessage(bot, message.Chat.ID, text)
+	}
+
+	// 2. 构建编辑参数
+	target := matches[0].reminder
+	params := service.EditReminderParams{
+		ReminderID: target.ID,
+	}
+
+	// 处理新时间
+	if parseResult.Edit.NewTime != nil {
+		newTime := fmt.Sprintf("%02d:%02d:00", parseResult.Edit.NewTime.Hour, parseResult.Edit.NewTime.Minute)
+		params.NewTime = &newTime
+	}
+
+	// 处理新模式
+	if parseResult.Edit.NewPattern != "" {
+		params.NewPattern = &parseResult.Edit.NewPattern
+	}
+
+	// 处理新标题
+	if parseResult.Edit.NewTitle != "" {
+		params.NewTitle = &parseResult.Edit.NewTitle
+	}
+
+	// TODO: 未来可以支持描述编辑 - 将 NewText 映射到 NewDescription
+	// if parseResult.Edit.NewText != "" {
+	//     params.NewDescription = &parseResult.Edit.NewText
+	// }
+
+	// 3. 执行编辑
+	if err := h.reminderService.EditReminder(ctx, params); err != nil {
+		logger.Errorf("编辑提醒失败: %v", err)
+		return h.sendErrorMessage(bot, message.Chat.ID, "编辑提醒失败，请稍后再试")
+	}
+
+	// 4. 获取更新后的提醒并展示
+	updated, _ := h.reminderService.GetReminderByID(ctx, target.ID)
+	if updated != nil {
+		target = updated
+	}
+
+	response := "✅ 已成功修改提醒\n\n"
+	response += fmt.Sprintf("📝 %s\n⏰ %s", target.Title, h.formatSchedule(target))
+	if target.Description != "" {
+		response += fmt.Sprintf("\n📄 %s", target.Description)
+	}
+
+	return h.sendMessage(bot, message.Chat.ID, response)
 }
 
 // handlePauseIntent 处理暂停意图（预留）
