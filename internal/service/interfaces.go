@@ -34,6 +34,7 @@ type ReminderService interface {
 	GetUserReminders(ctx context.Context, userID uint) ([]*models.Reminder, error)
 	GetReminderByID(ctx context.Context, id uint) (*models.Reminder, error)
 	UpdateReminder(ctx context.Context, reminder *models.Reminder) error
+	EditReminder(ctx context.Context, params EditReminderParams) error
 	DeleteReminder(ctx context.Context, id uint) error
 	PauseReminder(ctx context.Context, id uint, duration time.Duration, reason string) error
 	ResumeReminder(ctx context.Context, id uint) error

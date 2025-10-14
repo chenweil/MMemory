@@ -10,11 +10,16 @@ import (
 	"mmemory/pkg/logger"
 )
 
-type notificationService struct {
-	bot *tgbotapi.BotAPI
+// BotAPI 接口（用于测试）
+type BotAPI interface {
+	Send(c tgbotapi.Chattable) (tgbotapi.Message, error)
 }
 
-func NewNotificationService(bot *tgbotapi.BotAPI) NotificationService {
+type notificationService struct {
+	bot BotAPI
+}
+
+func NewNotificationService(bot BotAPI) NotificationService {
 	return &notificationService{
 		bot: bot,
 	}

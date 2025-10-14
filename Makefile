@@ -39,12 +39,12 @@ run:
 ## test: 运行所有测试
 test:
 	@echo "🧪 运行测试..."
-	go test -v ./...
+	CGO_ENABLED=1 go test -v ./...
 
 ## test-cover: 运行测试并生成覆盖率报告
 test-cover:
 	@echo "📊 生成测试覆盖率报告..."
-	go test -coverprofile=coverage.out ./...
+	CGO_ENABLED=1 go test -coverprofile=coverage.out ./...
 	go tool cover -html=coverage.out -o coverage.html
 	@echo "✅ 覆盖率报告已生成: coverage.html"
 

@@ -3,6 +3,7 @@ package ai
 import (
 	"errors"
 	"fmt"
+	"strings"
 )
 
 // AI相关错误定义
@@ -126,7 +127,5 @@ func IsModelError(err error) bool {
 
 // contains 检查字符串是否包含子字符串
 func contains(s, substr string) bool {
-	return len(s) >= len(substr) && (s == substr || len(s) > len(substr) && 
-		(s[:len(substr)] == substr || s[len(s)-len(substr):] == substr || 
-		 len(s) > len(substr)*2 && s[len(s)/2-len(substr)/2:len(s)/2+len(substr)/2+len(substr)%2] == substr))
+	return strings.Contains(s, substr)
 }

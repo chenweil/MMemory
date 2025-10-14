@@ -176,3 +176,76 @@ func (s *reminderService) ResumeReminder(ctx context.Context, id uint) error {
 
 	return nil
 }
+
+// EditReminderParams 编辑提醒的参数
+type EditReminderParams struct {
+	ReminderID      uint
+	NewTime         *string // 新的时间 (HH:MM:SS 格式)，可选
+	NewPattern      *string // 新的重复模式，可选
+	NewTitle        *string // 新的标题，可选
+	NewDescription  *string // 新的描述，可选
+}
+
+// EditReminder 编辑提醒（支持部分更新）
+func (s *reminderService) EditReminder(ctx context.Context, params EditReminderParams) error {
+	if params.ReminderID == 0 {
+		return fmt.Errorf("提醒ID不能为空")
+	}
+
+	// 1. 获取现有提醒
+	reminder, err := s.reminderRepo.GetByID(ctx, params.ReminderID)
+	if err != nil {
+		return fmt.Errorf("获取提醒失败: %w", err)
+	}
+	if reminder == nil {
+		return fmt.Errorf("提醒不存在")
+	}
+
+	// 记录是否有修改
+	modified := false
+
+	// 2. 应用修改
+	if params.NewTime != nil && *params.NewTime != "" {
+		reminder.TargetTime = *params.NewTime
+		modified = true
+	}
+
+	if params.NewPattern != nil && *params.NewPattern != "" {
+		reminder.SchedulePattern = *params.NewPattern
+		modified = true
+	}
+
+	if params.NewTitle != nil && *params.NewTitle != "" {
+		reminder.Title = *params.NewTitle
+		modified = true
+	}
+
+	if params.NewDescription != nil {
+		reminder.Description = *params.NewDescription
+		modified = true
+	}
+
+	// 如果没有任何修改，直接返回
+	if !modified {
+		return fmt.Errorf("没有提供任何修改参数")
+	}
+
+	// 3. 更新数据库
+	if err := s.reminderRepo.Update(ctx, reminder); err != nil {
+		return fmt.Errorf("更新数据库失败: %w", err)
+	}
+
+	// 4. 刷新调度器
+	if s.scheduler != nil && reminder.IsActive {
+		// 移除旧调度
+		s.scheduler.RemoveReminder(params.ReminderID)
+
+		// 添加新调度
+		if err := s.scheduler.AddReminder(reminder); err != nil {
+			fmt.Printf("重新调度失败: %v", err)
+			// 调度失败不影响更新，只记录错误
+		}
+	}
+
+	return nil
+}

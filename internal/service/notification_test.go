@@ -3,189 +3,141 @@ package service
 import (
 	"context"
 	"fmt"
+	"strings"
 	"testing"
 	"time"
+
+	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api/v5"
 
 	"mmemory/internal/models"
 )
 
-// testNotificationService 测试专用的通知服务
-type testNotificationService struct {
-	sentMessages []string
-	sentUsers    []int64
+// Mock Bot API for testing
+type mockBotAPI struct {
+	sentMessages []tgbotapi.Chattable
+	shouldError  bool
 }
 
-func newTestNotificationService() *testNotificationService {
-	return &testNotificationService{
-		sentMessages: make([]string, 0),
-		sentUsers:    make([]int64, 0),
+func (m *mockBotAPI) Send(c tgbotapi.Chattable) (tgbotapi.Message, error) {
+	if m.shouldError {
+		return tgbotapi.Message{}, fmt.Errorf("mock send error")
 	}
+	m.sentMessages = append(m.sentMessages, c)
+	return tgbotapi.Message{MessageID: 1}, nil
 }
 
-func (s *testNotificationService) SendReminder(ctx context.Context, log *models.ReminderLog) error {
-	if log.Reminder.User.TelegramID == 0 {
-		return fmt.Errorf("用户Telegram ID为空")
-	}
-	
-	// 构建提醒消息
-	message := s.buildReminderMessage(&log.Reminder)
-	
-	// 记录发送的消息
-	s.sentMessages = append(s.sentMessages, message)
-	s.sentUsers = append(s.sentUsers, log.Reminder.User.TelegramID)
-	
-	return nil
+func (m *mockBotAPI) Request(c tgbotapi.Chattable) (*tgbotapi.APIResponse, error) {
+	return &tgbotapi.APIResponse{Ok: true}, nil
 }
 
-func (s *testNotificationService) SendFollowUp(ctx context.Context, log *models.ReminderLog) error {
-	if log.Reminder.User.TelegramID == 0 {
-		return fmt.Errorf("用户Telegram ID为空")
+func (m *mockBotAPI) GetLastSentMessage() tgbotapi.Chattable {
+	if len(m.sentMessages) == 0 {
+		return nil
 	}
-	
-	// 构建关怀消息
-	message := s.buildFollowUpMessage(&log.Reminder, log.FollowUpCount)
-	
-	// 记录发送的消息
-	s.sentMessages = append(s.sentMessages, message)
-	s.sentUsers = append(s.sentUsers, log.Reminder.User.TelegramID)
-	
-	return nil
-}
-
-// buildReminderMessage 构建提醒消息
-func (s *testNotificationService) buildReminderMessage(reminder *models.Reminder) string {
-	var message string
-	
-	// 根据提醒类型使用不同的emoji和措辞
-	switch reminder.Type {
-	case models.ReminderTypeHabit:
-		message = fmt.Sprintf("⏰ 习惯提醒\n\n"+
-			"📝 %s\n\n"+
-			"已经到了约定的时间，完成了吗？", reminder.Title)
-	case models.ReminderTypeTask:
-		message = fmt.Sprintf("📋 任务提醒\n\n"+
-			"📝 %s\n\n"+
-			"该处理这个任务了，准备好了吗？", reminder.Title)
-	default:
-		message = fmt.Sprintf("🔔 提醒\n\n"+
-			"📝 %s\n\n"+
-			"时间到了，请查看！", reminder.Title)
-	}
-	
-	return message
-}
-
-// buildFollowUpMessage 构建关怀消息
-func (s *testNotificationService) buildFollowUpMessage(reminder *models.Reminder, followUpCount int) string {
-	var message string
-	
-	switch followUpCount {
-	case 0:
-		message = fmt.Sprintf("🤔 还没完成吗？\n\n"+
-			"📝 %s\n\n"+
-			"没关系，有什么困难吗？需要延期还是跳过？", reminder.Title)
-	case 1:
-		message = fmt.Sprintf("😊 温馨提醒\n\n"+
-			"📝 %s\n\n"+
-			"这个任务还在等着你呢，要不要处理一下？", reminder.Title)
-	default:
-		message = fmt.Sprintf("💪 最后提醒\n\n"+
-			"📝 %s\n\n"+
-			"今天确实不方便的话，可以选择跳过哦～", reminder.Title)
-	}
-	
-	return message
+	return m.sentMessages[len(m.sentMessages)-1]
 }
 
 func TestNotificationService_SendReminder(t *testing.T) {
-	service := newTestNotificationService()
-	
 	// 创建测试用户
 	user := &models.User{
 		ID:         1,
 		TelegramID: 123456789,
 		FirstName:  "测试用户",
 	}
-	
-	// 创建测试提醒
-	reminder := &models.Reminder{
-		ID:          1,
-		UserID:      1,
-		Title:       "喝水提醒",
-		Description: "每天要喝8杯水",
-		Type:        models.ReminderTypeHabit,
-		User:        *user,
-	}
-	
-	// 创建测试日志
-	log := &models.ReminderLog{
-		ID:            1,
-		ReminderID:    1,
-		ScheduledTime: time.Now(),
-		Status:        models.ReminderStatusPending,
-		Reminder:      *reminder,
-	}
-	
+
 	ctx := context.Background()
-	
+
 	tests := []struct {
-		name          string
-		log           *models.ReminderLog
-		wantErr       bool
-		wantMsgCount  int
+		name        string
+		reminder    *models.Reminder
+		wantErr     bool
+		wantContains []string
 	}{
 		{
-			name:         "成功发送习惯提醒",
-			log:          log,
-			wantErr:      false,
-			wantMsgCount: 1,
+			name: "成功发送习惯提醒",
+			reminder: &models.Reminder{
+				ID:          1,
+				UserID:      1,
+				Title:       "喝水提醒",
+				Description: "每天要喝8杯水",
+				Type:        models.ReminderTypeHabit,
+				User:        *user,
+			},
+			wantErr:     false,
+			wantContains: []string{"习惯提醒", "喝水提醒"},
 		},
 		{
 			name: "成功发送任务提醒",
-			log: &models.ReminderLog{
-				ID:            2,
-				ReminderID:    2,
-				ScheduledTime: time.Now(),
-				Status:        models.ReminderStatusPending,
-				Reminder: models.Reminder{
-					ID:          2,
-					UserID:      1,
-					Title:       "开会提醒",
-					Description: "下午3点开会",
-					Type:        models.ReminderTypeTask,
-					User:        *user,
-				},
+			reminder: &models.Reminder{
+				ID:          2,
+				UserID:      1,
+				Title:       "开会提醒",
+				Description: "下午3点开会",
+				Type:        models.ReminderTypeTask,
+				User:        *user,
 			},
-			wantErr:      false,
-			wantMsgCount: 1,
+			wantErr:     false,
+			wantContains: []string{"任务提醒", "开会提醒"},
+		},
+		{
+			name: "用户TelegramID为空时失败",
+			reminder: &models.Reminder{
+				ID:          3,
+				UserID:      1,
+				Title:       "测试",
+				Type:        models.ReminderTypeHabit,
+				User:        models.User{TelegramID: 0},
+			},
+			wantErr: true,
 		},
 	}
-	
+
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			initialCount := len(service.sentMessages)
-			
-			err := service.SendReminder(ctx, tt.log)
-			
+			mockBot := &mockBotAPI{}
+			service := NewNotificationService(mockBot)
+
+			log := &models.ReminderLog{
+				ID:            1,
+				ReminderID:    tt.reminder.ID,
+				ScheduledTime: time.Now(),
+				Status:        models.ReminderStatusPending,
+				Reminder:      *tt.reminder,
+			}
+
+			err := service.SendReminder(ctx, log)
+
 			if (err != nil) != tt.wantErr {
 				t.Errorf("SendReminder() error = %v, wantErr %v", err, tt.wantErr)
 				return
 			}
-			
+
 			if !tt.wantErr {
-				finalCount := len(service.sentMessages)
-				actualCount := finalCount - initialCount
-				
-				if actualCount != tt.wantMsgCount {
-					t.Errorf("SendReminder() 发送消息数 = %d, want %d", actualCount, tt.wantMsgCount)
+				// 验证消息已发送
+				if len(mockBot.sentMessages) == 0 {
+					t.Error("SendReminder() 未发送任何消息")
+					return
 				}
-				
-				// 验证消息发送到正确的用户
-				if finalCount > 0 {
-					lastUserID := service.sentUsers[finalCount-1]
-					if lastUserID != tt.log.Reminder.User.TelegramID {
-						t.Errorf("SendReminder() UserID = %d, want %d", 
-							lastUserID, tt.log.Reminder.User.TelegramID)
+
+				// 获取最后发送的消息
+				lastMsg := mockBot.GetLastSentMessage()
+				if msgConfig, ok := lastMsg.(tgbotapi.MessageConfig); ok {
+					// 验证消息内容
+					for _, want := range tt.wantContains {
+						if !strings.Contains(msgConfig.Text, want) {
+							t.Errorf("消息内容缺少 '%s': %s", want, msgConfig.Text)
+						}
+					}
+
+					// 验证消息发送到正确的用户
+					if msgConfig.ChatID != tt.reminder.User.TelegramID {
+						t.Errorf("SendReminder() ChatID = %d, want %d",
+							msgConfig.ChatID, tt.reminder.User.TelegramID)
+					}
+
+					// 验证有键盘按钮
+					if msgConfig.ReplyMarkup == nil {
+						t.Error("SendReminder() 消息缺少回复键盘")
 					}
 				}
 			}
@@ -194,15 +146,13 @@ func TestNotificationService_SendReminder(t *testing.T) {
 }
 
 func TestNotificationService_SendFollowUp(t *testing.T) {
-	service := newTestNotificationService()
-	
 	// 创建测试用户
 	user := &models.User{
 		ID:         1,
 		TelegramID: 123456789,
 		FirstName:  "测试用户",
 	}
-	
+
 	// 创建测试提醒
 	reminder := &models.Reminder{
 		ID:          1,
@@ -212,38 +162,40 @@ func TestNotificationService_SendFollowUp(t *testing.T) {
 		Type:        models.ReminderTypeHabit,
 		User:        *user,
 	}
-	
+
 	ctx := context.Background()
-	
+
 	tests := []struct {
-		name         string
+		name          string
 		followUpCount int
-		wantErr      bool
-		wantMsgCount int
+		wantErr       bool
+		wantContains  []string
 	}{
 		{
-			name:         "第一次关怀消息",
+			name:          "第一次关怀消息",
 			followUpCount: 0,
-			wantErr:      false,
-			wantMsgCount: 1,
+			wantErr:       false,
+			wantContains:  []string{"还没完成吗", "运动提醒"},
 		},
 		{
-			name:         "第二次关怀消息",
+			name:          "第二次关怀消息",
 			followUpCount: 1,
-			wantErr:      false,
-			wantMsgCount: 1,
+			wantErr:       false,
+			wantContains:  []string{"温馨提醒", "运动提醒"},
 		},
 		{
-			name:         "第三次关怀消息",
+			name:          "第三次关怀消息",
 			followUpCount: 2,
-			wantErr:      false,
-			wantMsgCount: 1,
+			wantErr:       false,
+			wantContains:  []string{"最后提醒", "运动提醒"},
 		},
 	}
-	
+
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			// 创建测试日志
+			mockBot := &mockBotAPI{}
+			service := NewNotificationService(mockBot)
+
 			log := &models.ReminderLog{
 				ID:            1,
 				ReminderID:    1,
@@ -252,30 +204,29 @@ func TestNotificationService_SendFollowUp(t *testing.T) {
 				FollowUpCount: tt.followUpCount,
 				Reminder:      *reminder,
 			}
-			
-			initialCount := len(service.sentMessages)
-			
+
 			err := service.SendFollowUp(ctx, log)
-			
+
 			if (err != nil) != tt.wantErr {
 				t.Errorf("SendFollowUp() error = %v, wantErr %v", err, tt.wantErr)
 				return
 			}
-			
+
 			if !tt.wantErr {
-				finalCount := len(service.sentMessages)
-				actualCount := finalCount - initialCount
-				
-				if actualCount != tt.wantMsgCount {
-					t.Errorf("SendFollowUp() 发送消息数 = %d, want %d", actualCount, tt.wantMsgCount)
+				// 验证消息已发送
+				if len(mockBot.sentMessages) == 0 {
+					t.Error("SendFollowUp() 未发送任何消息")
+					return
 				}
-				
-				// 验证消息发送到正确的用户
-				if finalCount > 0 {
-					lastUserID := service.sentUsers[finalCount-1]
-					if lastUserID != user.TelegramID {
-						t.Errorf("SendFollowUp() UserID = %d, want %d", 
-							lastUserID, user.TelegramID)
+
+				// 获取最后发送的消息
+				lastMsg := mockBot.GetLastSentMessage()
+				if msgConfig, ok := lastMsg.(tgbotapi.MessageConfig); ok {
+					// 验证消息内容
+					for _, want := range tt.wantContains {
+						if !strings.Contains(msgConfig.Text, want) {
+							t.Errorf("消息内容缺少 '%s': %s", want, msgConfig.Text)
+						}
 					}
 				}
 			}
@@ -283,87 +234,68 @@ func TestNotificationService_SendFollowUp(t *testing.T) {
 	}
 }
 
-func TestNotificationService_MessageContent(t *testing.T) {
-	service := newTestNotificationService()
-	
-	// 创建测试用户
+func TestNotificationService_SendError(t *testing.T) {
 	user := &models.User{
 		ID:         1,
 		TelegramID: 123456789,
-		FirstName:  "张三",
+		FirstName:  "测试用户",
 	}
-	
+
+	reminder := &models.Reminder{
+		ID:     1,
+		UserID: 1,
+		Title:  "测试提醒",
+		Type:   models.ReminderTypeHabit,
+		User:   *user,
+	}
+
+	log := &models.ReminderLog{
+		ID:            1,
+		ReminderID:    1,
+		ScheduledTime: time.Now(),
+		Status:        models.ReminderStatusPending,
+		Reminder:      *reminder,
+	}
+
 	ctx := context.Background()
-	
-	tests := []struct {
-		name           string
-		reminderType   models.ReminderType
-		reminderTitle  string
-		wantContains   []string
-	}{
-		{
-			name:          "习惯提醒消息格式",
-			reminderType:  models.ReminderTypeHabit,
-			reminderTitle: "每日阅读",
-			wantContains:  []string{"习惯提醒", "每日阅读", "完成了吗"},
-		},
-		{
-			name:          "任务提醒消息格式",
-			reminderType:  models.ReminderTypeTask,
-			reminderTitle: "项目会议",
-			wantContains:  []string{"任务提醒", "项目会议", "准备好了吗"},
-		},
-	}
-	
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			// 创建测试提醒和日志
-			reminder := &models.Reminder{
-				ID:     1,
-				UserID: 1,
-				Title:  tt.reminderTitle,
-				Type:   tt.reminderType,
-				User:   *user,
-			}
-			
-			log := &models.ReminderLog{
-				ID:            1,
-				ReminderID:    1,
-				ScheduledTime: time.Now(),
-				Status:        models.ReminderStatusPending,
-				Reminder:      *reminder,
-			}
-			
-			initialCount := len(service.sentMessages)
-			
-			err := service.SendReminder(ctx, log)
-			if err != nil {
-				t.Fatalf("SendReminder() error = %v", err)
-			}
-			
-			// 检查消息内容
-			if len(service.sentMessages) > initialCount {
-				msg := service.sentMessages[len(service.sentMessages)-1]
-				for _, want := range tt.wantContains {
-					if !testContains(msg, want) {
-						t.Errorf("消息内容缺少 '%s': %s", want, msg)
-					}
-				}
-			}
-		})
-	}
+
+	t.Run("Bot发送失败时返回错误", func(t *testing.T) {
+		mockBot := &mockBotAPI{shouldError: true}
+		service := NewNotificationService(mockBot)
+
+		err := service.SendReminder(ctx, log)
+		if err == nil {
+			t.Error("SendReminder() 应该返回错误当Bot发送失败")
+		}
+	})
 }
 
-// 辅助函数：检查字符串是否包含子字符串
-func testContains(s, substr string) bool {
-	if len(substr) == 0 {
-		return true
+func TestNotificationService_BuildReminderKeyboard(t *testing.T) {
+	mockBot := &mockBotAPI{}
+	service := NewNotificationService(mockBot).(*notificationService)
+
+	logID := uint(123)
+	keyboard := service.buildReminderKeyboard(logID)
+
+	// 验证键盘有两行
+	if len(keyboard.InlineKeyboard) != 2 {
+		t.Errorf("buildReminderKeyboard() 行数 = %d, want 2", len(keyboard.InlineKeyboard))
 	}
-	
-	for i := 0; i <= len(s)-len(substr); i++ {
-		if s[i:i+len(substr)] == substr {
-			return true
-		}
+
+	// 验证第一行有2个按钮
+	if len(keyboard.InlineKeyboard[0]) != 2 {
+		t.Errorf("buildReminderKeyboard() 第一行按钮数 = %d, want 2", len(keyboard.InlineKeyboard[0]))
 	}
-	return false
+
+	// 验证第二行有2个按钮
+	if len(keyboard.InlineKeyboard[1]) != 2 {
+		t.Errorf("buildReminderKeyboard() 第二行按钮数 = %d, want 2", len(keyboard.InlineKeyboard[1]))
+	}
+
+	// 验证按钮数据包含正确的logID
+	completeData := *keyboard.InlineKeyboard[0][0].CallbackData
+	expectedComplete := fmt.Sprintf("reminder_complete_%d", logID)
+	if completeData != expectedComplete {
+		t.Errorf("完成按钮数据 = %s, want %s", completeData, expectedComplete)
+	}
 }

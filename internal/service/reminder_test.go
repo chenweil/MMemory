@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"sync"
 	"testing"
 	"time"
 
@@ -12,6 +13,7 @@ import (
 type mockReminderRepository struct {
 	reminders map[uint]*models.Reminder
 	idCounter uint
+	mu        sync.Mutex
 }
 
 func newMockReminderRepository() *mockReminderRepository {
@@ -22,6 +24,9 @@ func newMockReminderRepository() *mockReminderRepository {
 }
 
 func (m *mockReminderRepository) Create(ctx context.Context, reminder *models.Reminder) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
 	reminder.ID = m.idCounter
 	m.reminders[m.idCounter] = reminder
 	m.idCounter++
@@ -29,11 +34,17 @@ func (m *mockReminderRepository) Create(ctx context.Context, reminder *models.Re
 }
 
 func (m *mockReminderRepository) GetByID(ctx context.Context, id uint) (*models.Reminder, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
 	reminder := m.reminders[id]
 	return reminder, nil
 }
 
 func (m *mockReminderRepository) GetByUserID(ctx context.Context, userID uint) ([]*models.Reminder, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
 	var result []*models.Reminder
 	for _, reminder := range m.reminders {
 		if reminder.UserID == userID {
@@ -44,6 +55,9 @@ func (m *mockReminderRepository) GetByUserID(ctx context.Context, userID uint) (
 }
 
 func (m *mockReminderRepository) GetActiveReminders(ctx context.Context) ([]*models.Reminder, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
 	var result []*models.Reminder
 	for _, reminder := range m.reminders {
 		if reminder.IsActive {
@@ -54,6 +68,9 @@ func (m *mockReminderRepository) GetActiveReminders(ctx context.Context) ([]*mod
 }
 
 func (m *mockReminderRepository) Update(ctx context.Context, reminder *models.Reminder) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
 	if existing := m.reminders[reminder.ID]; existing != nil {
 		m.reminders[reminder.ID] = reminder
 	}
@@ -61,11 +78,17 @@ func (m *mockReminderRepository) Update(ctx context.Context, reminder *models.Re
 }
 
 func (m *mockReminderRepository) Delete(ctx context.Context, id uint) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
 	delete(m.reminders, id)
 	return nil
 }
 
 func (m *mockReminderRepository) CountByStatus(ctx context.Context, status models.ReminderStatStatus) (int64, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
 	var count int64
 	for _, reminder := range m.reminders {
 		// 简化实现，实际应该根据状态统计
@@ -350,4 +373,203 @@ func TestReminderService_ResumeReminder(t *testing.T) {
 	if len(scheduler.added) == 0 || scheduler.added[len(scheduler.added)-1] != reminder.ID {
 		t.Fatalf("ResumeReminder 应重新加入调度，got %v", scheduler.added)
 	}
+}
+
+func TestReminderService_EditReminder(t *testing.T) {
+	mockRepo := newMockReminderRepository()
+	ctx := context.Background()
+
+	reminderService := NewReminderService(mockRepo)
+
+	scheduler := &mockScheduler{}
+	if setter, ok := reminderService.(interface{ SetScheduler(SchedulerService) }); ok {
+		setter.SetScheduler(scheduler)
+	}
+
+	// 创建测试提醒
+	reminder := &models.Reminder{
+		UserID:          1,
+		Title:           "健身打卡",
+		Description:     "每天坚持健身",
+		Type:            models.ReminderTypeHabit,
+		SchedulePattern: "daily",
+		TargetTime:      "07:00:00",
+		IsActive:        true,
+	}
+
+	if err := reminderService.CreateReminder(ctx, reminder); err != nil {
+		t.Fatalf("创建提醒失败: %v", err)
+	}
+
+	t.Run("成功修改时间", func(t *testing.T) {
+		newTime := "19:00:00"
+		params := EditReminderParams{
+			ReminderID: reminder.ID,
+			NewTime:    &newTime,
+		}
+
+		err := reminderService.EditReminder(ctx, params)
+		if err != nil {
+			t.Fatalf("EditReminder 返回错误: %v", err)
+		}
+
+		// 验证数据库更新
+		updated, _ := mockRepo.GetByID(ctx, reminder.ID)
+		if updated.TargetTime != newTime {
+			t.Errorf("时间未更新: got %v, want %v", updated.TargetTime, newTime)
+		}
+
+		// 验证调度器刷新
+		if len(scheduler.removed) == 0 {
+			t.Error("EditReminder 应该移除旧调度")
+		}
+		if len(scheduler.added) == 0 {
+			t.Error("EditReminder 应该添加新调度")
+		}
+	})
+
+	t.Run("成功修改模式", func(t *testing.T) {
+		scheduler.removed = nil
+		scheduler.added = nil
+
+		newPattern := "weekly:1,3,5"
+		params := EditReminderParams{
+			ReminderID: reminder.ID,
+			NewPattern: &newPattern,
+		}
+
+		err := reminderService.EditReminder(ctx, params)
+		if err != nil {
+			t.Fatalf("EditReminder 返回错误: %v", err)
+		}
+
+		// 验证数据库更新
+		updated, _ := mockRepo.GetByID(ctx, reminder.ID)
+		if updated.SchedulePattern != newPattern {
+			t.Errorf("模式未更新: got %v, want %v", updated.SchedulePattern, newPattern)
+		}
+	})
+
+	t.Run("成功修改标题", func(t *testing.T) {
+		newTitle := "跑步打卡"
+		params := EditReminderParams{
+			ReminderID: reminder.ID,
+			NewTitle:   &newTitle,
+		}
+
+		err := reminderService.EditReminder(ctx, params)
+		if err != nil {
+			t.Fatalf("EditReminder 返回错误: %v", err)
+		}
+
+		// 验证数据库更新
+		updated, _ := mockRepo.GetByID(ctx, reminder.ID)
+		if updated.Title != newTitle {
+			t.Errorf("标题未更新: got %v, want %v", updated.Title, newTitle)
+		}
+	})
+
+	t.Run("成功修改描述", func(t *testing.T) {
+		newDesc := "每周三次跑步"
+		params := EditReminderParams{
+			ReminderID:     reminder.ID,
+			NewDescription: &newDesc,
+		}
+
+		err := reminderService.EditReminder(ctx, params)
+		if err != nil {
+			t.Fatalf("EditReminder 返回错误: %v", err)
+		}
+
+		// 验证数据库更新
+		updated, _ := mockRepo.GetByID(ctx, reminder.ID)
+		if updated.Description != newDesc {
+			t.Errorf("描述未更新: got %v, want %v", updated.Description, newDesc)
+		}
+	})
+
+	t.Run("同时修改多个字段", func(t *testing.T) {
+		newTime := "06:30:00"
+		newTitle := "晨跑"
+		newPattern := "weekly:1,3,5,7"
+
+		params := EditReminderParams{
+			ReminderID: reminder.ID,
+			NewTime:    &newTime,
+			NewTitle:   &newTitle,
+			NewPattern: &newPattern,
+		}
+
+		err := reminderService.EditReminder(ctx, params)
+		if err != nil {
+			t.Fatalf("EditReminder 返回错误: %v", err)
+		}
+
+		// 验证数据库更新
+		updated, _ := mockRepo.GetByID(ctx, reminder.ID)
+		if updated.TargetTime != newTime {
+			t.Errorf("时间未更新: got %v, want %v", updated.TargetTime, newTime)
+		}
+		if updated.Title != newTitle {
+			t.Errorf("标题未更新: got %v, want %v", updated.Title, newTitle)
+		}
+		if updated.SchedulePattern != newPattern {
+			t.Errorf("模式未更新: got %v, want %v", updated.SchedulePattern, newPattern)
+		}
+	})
+
+	t.Run("提醒ID为0时失败", func(t *testing.T) {
+		newTime := "08:00:00"
+		params := EditReminderParams{
+			ReminderID: 0,
+			NewTime:    &newTime,
+		}
+
+		err := reminderService.EditReminder(ctx, params)
+		if err == nil {
+			t.Error("EditReminder 应该返回错误当 ReminderID 为 0")
+		}
+	})
+
+	t.Run("提醒不存在时失败", func(t *testing.T) {
+		newTime := "08:00:00"
+		params := EditReminderParams{
+			ReminderID: 9999,
+			NewTime:    &newTime,
+		}
+
+		err := reminderService.EditReminder(ctx, params)
+		if err == nil {
+			t.Error("EditReminder 应该返回错误当提醒不存在")
+		}
+	})
+
+	t.Run("没有提供任何修改参数时失败", func(t *testing.T) {
+		params := EditReminderParams{
+			ReminderID: reminder.ID,
+		}
+
+		err := reminderService.EditReminder(ctx, params)
+		if err == nil {
+			t.Error("EditReminder 应该返回错误当没有提供任何修改参数")
+		}
+	})
+
+	t.Run("空字符串参数不应被视为有效修改", func(t *testing.T) {
+		emptyTime := ""
+		emptyPattern := ""
+		emptyTitle := ""
+
+		params := EditReminderParams{
+			ReminderID: reminder.ID,
+			NewTime:    &emptyTime,
+			NewPattern: &emptyPattern,
+			NewTitle:   &emptyTitle,
+		}
+
+		err := reminderService.EditReminder(ctx, params)
+		if err == nil {
+			t.Error("EditReminder 应该返回错误当所有参数都是空字符串")
+		}
+	})
 }

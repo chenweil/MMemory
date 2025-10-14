@@ -33,8 +33,8 @@ func main() {
 	// 模拟业务操作
 	for i := 0; i < 10; i++ {
 		// 记录消息处理
-		metrics.RecordBotMessage("text", nil)
-		metrics.RecordBotMessage("callback", fmt.Errorf("test error"))
+		metrics.RecordBotMessage("text", "success")
+		metrics.RecordBotMessage("callback", "error")
 		
 		// 记录提醒操作
 		metrics.RecordReminderCreated()

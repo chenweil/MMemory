@@ -227,14 +227,18 @@ func TestDelayReminderWorkflow(t *testing.T) {
 		// 找到延期记录
 		var delayLog *models.ReminderLog
 		for _, log := range logs {
-			if log.Status == models.ReminderStatusPending && log.ScheduledTime.Equal(delayTime.Truncate(time.Second)) {
+			// 使用时间差来比较，允许1秒的误差
+			timeDiff := log.ScheduledTime.Sub(delayTime).Abs()
+			if log.Status == models.ReminderStatusPending && timeDiff < time.Second {
 				delayLog = log
 				break
 			}
 		}
-		
+
 		assert.NotNil(t, delayLog, "应该找到延期提醒记录")
-		assert.Equal(t, models.ReminderStatusPending, delayLog.Status)
+		if delayLog != nil {
+			assert.Equal(t, models.ReminderStatusPending, delayLog.Status)
+		}
 	})
 }
 

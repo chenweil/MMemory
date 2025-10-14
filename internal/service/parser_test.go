@@ -221,3 +221,76 @@ func TestParserService_parseWeekdays(t *testing.T) {
 		})
 	}
 }
+func TestParserService_adjustHourByPeriod(t *testing.T) {
+	parser := NewParserService()
+
+	tests := []struct {
+		name     string
+		hour     int
+		period   string
+		wantHour int
+	}{
+		{name: "上午9点", hour: 9, period: "上午", wantHour: 9},
+		{name: "上午12点应该是午夜0点", hour: 12, period: "上午", wantHour: 0},
+		{name: "下午3点应该是15点", hour: 3, period: "下午", wantHour: 15},
+		{name: "下午12点应该是正午12点", hour: 12, period: "下午", wantHour: 12},
+		{name: "晚上7点应该是19点", hour: 7, period: "晚上", wantHour: 19},
+		{name: "晚上12点应该是午夜0点", hour: 12, period: "晚上", wantHour: 0},
+		{name: "无匹配时间段返回原值", hour: 15, period: "其他", wantHour: 15},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := parser.adjustHourByPeriod(tt.hour, tt.period)
+			if got != tt.wantHour {
+				t.Errorf("adjustHourByPeriod(%d, %s) = %d, want %d", tt.hour, tt.period, got, tt.wantHour)
+			}
+		})
+	}
+}
+
+func TestParserService_chineseWeekdayToInt(t *testing.T) {
+	parser := NewParserService()
+
+	tests := []struct {
+		weekday string
+		want    int
+	}{
+		{"一", 1}, {"二", 2}, {"三", 3}, {"四", 4}, {"五", 5}, {"六", 6}, {"日", 7},
+	}
+
+	for _, tt := range tests {
+		t.Run("中文"+tt.weekday, func(t *testing.T) {
+			got := parser.chineseWeekdayToInt(tt.weekday)
+			if got != tt.want {
+				t.Errorf("chineseWeekdayToInt(%s) = %d, want %d", tt.weekday, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestParserService_getNextWeekdayDate(t *testing.T) {
+	parser := NewParserService()
+
+	t.Run("获取下周一", func(t *testing.T) {
+		nextMonday := parser.getNextWeekdayDate(1)
+		weekday := int(nextMonday.Weekday())
+		if weekday == 0 {
+			weekday = 7
+		}
+		if weekday != 1 {
+			t.Errorf("getNextWeekdayDate(1) 返回的不是周一，而是 %d", weekday)
+		}
+	})
+
+	t.Run("获取下周五", func(t *testing.T) {
+		nextFriday := parser.getNextWeekdayDate(5)
+		weekday := int(nextFriday.Weekday())
+		if weekday == 0 {
+			weekday = 7
+		}
+		if weekday != 5 {
+			t.Errorf("getNextWeekdayDate(5) 返回的不是周五，而是 %d", weekday)
+		}
+	})
+}
