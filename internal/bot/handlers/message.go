@@ -10,6 +10,7 @@ import (
 
 	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api/v5"
 
+	botinterface "mmemory/internal/bot"
 	"mmemory/internal/models"
 	"mmemory/internal/service"
 	"mmemory/pkg/ai"
@@ -25,6 +26,27 @@ type MessageHandler struct {
 	// AI服务（可选，用于智能解析和对话）
 	aiParserService     service.AIParserService
 	conversationService service.ConversationService
+	contextManager      service.ContextManagerService
+	suggestionService   service.ReminderSuggestionService
+}
+
+type conversationContextKey struct{}
+
+func getConversationContextState(ctx context.Context) *models.ConversationContextState {
+	if ctx == nil {
+		return nil
+	}
+	if value := ctx.Value(conversationContextKey{}); value != nil {
+		if state, ok := value.(*models.ConversationContextState); ok {
+			return state
+		}
+	}
+	return nil
+}
+
+func shouldTriggerSuggestion(text string) bool {
+	lower := strings.ToLower(strings.TrimSpace(text))
+	return strings.Contains(lower, "建议") || strings.Contains(lower, "推荐")
 }
 
 func NewMessageHandler(
@@ -33,6 +55,8 @@ func NewMessageHandler(
 	reminderLogService service.ReminderLogService,
 	aiParserService service.AIParserService,
 	conversationService service.ConversationService,
+	contextManager service.ContextManagerService,
+	suggestionService service.ReminderSuggestionService,
 ) *MessageHandler {
 	return &MessageHandler{
 		reminderService:     reminderService,
@@ -40,10 +64,12 @@ func NewMessageHandler(
 		reminderLogService:  reminderLogService,
 		aiParserService:     aiParserService,
 		conversationService: conversationService,
+		contextManager:      contextManager,
+		suggestionService:   suggestionService,
 	}
 }
 
-func (h *MessageHandler) HandleMessage(ctx context.Context, bot *tgbotapi.BotAPI, message *tgbotapi.Message) error {
+func (h *MessageHandler) HandleMessage(ctx context.Context, bot botinterface.BotAPI, message *tgbotapi.Message) error {
 	// 确保用户存在
 	user, err := h.ensureUser(ctx, message.From)
 	if err != nil {
@@ -59,7 +85,7 @@ func (h *MessageHandler) HandleMessage(ctx context.Context, bot *tgbotapi.BotAPI
 	return h.handleTextMessage(ctx, bot, message, user)
 }
 
-func (h *MessageHandler) handleCommand(ctx context.Context, bot *tgbotapi.BotAPI, message *tgbotapi.Message, user *models.User) error {
+func (h *MessageHandler) handleCommand(ctx context.Context, bot botinterface.BotAPI, message *tgbotapi.Message, user *models.User) error {
 	switch message.Command() {
 	case "start":
 		return h.handleStartCommand(bot, message)
@@ -78,7 +104,7 @@ func (h *MessageHandler) handleCommand(ctx context.Context, bot *tgbotapi.BotAPI
 	}
 }
 
-func (h *MessageHandler) handleStartCommand(bot *tgbotapi.BotAPI, message *tgbotapi.Message) error {
+func (h *MessageHandler) handleStartCommand(bot botinterface.BotAPI, message *tgbotapi.Message) error {
 	welcomeText := `👋 欢迎使用 MMemory 智能提醒助手！
 
 我可以帮助你：
@@ -95,7 +121,7 @@ func (h *MessageHandler) handleStartCommand(bot *tgbotapi.BotAPI, message *tgbot
 	return h.sendMessage(bot, message.Chat.ID, welcomeText)
 }
 
-func (h *MessageHandler) handleHelpCommand(bot *tgbotapi.BotAPI, message *tgbotapi.Message) error {
+func (h *MessageHandler) handleHelpCommand(bot botinterface.BotAPI, message *tgbotapi.Message) error {
 	helpText := `📖 MMemory 使用指南
 
 🔹 设置提醒：
@@ -118,7 +144,7 @@ func (h *MessageHandler) handleHelpCommand(bot *tgbotapi.BotAPI, message *tgbota
 	return h.sendMessage(bot, message.Chat.ID, helpText)
 }
 
-func (h *MessageHandler) handleVersionCommand(bot *tgbotapi.BotAPI, message *tgbotapi.Message) error {
+func (h *MessageHandler) handleVersionCommand(bot botinterface.BotAPI, message *tgbotapi.Message) error {
 	versionInfo := version.GetInfo()
 
 	versionText := fmt.Sprintf(`ℹ️ <b>MMemory 版本信息</b>
@@ -142,7 +168,7 @@ func (h *MessageHandler) handleVersionCommand(bot *tgbotapi.BotAPI, message *tgb
 	return h.sendMessage(bot, message.Chat.ID, versionText)
 }
 
-func (h *MessageHandler) handleListCommand(ctx context.Context, bot *tgbotapi.BotAPI, message *tgbotapi.Message, user *models.User) error {
+func (h *MessageHandler) handleListCommand(ctx context.Context, bot botinterface.BotAPI, message *tgbotapi.Message, user *models.User) error {
 	reminders, err := h.reminderService.GetUserReminders(ctx, user.ID)
 	if err != nil {
 		logger.Errorf("获取用户提醒列表失败: %v", err)
@@ -227,7 +253,7 @@ func (h *MessageHandler) handleListCommand(ctx context.Context, bot *tgbotapi.Bo
 	return err
 }
 
-func (h *MessageHandler) handleStatsCommand(ctx context.Context, bot *tgbotapi.BotAPI, message *tgbotapi.Message, user *models.User) error {
+func (h *MessageHandler) handleStatsCommand(ctx context.Context, bot botinterface.BotAPI, message *tgbotapi.Message, user *models.User) error {
 	stats, err := h.reminderLogService.GetUserStatistics(ctx, user.ID)
 	if err != nil {
 		logger.Errorf("获取用户统计数据失败: %v", err)
@@ -278,7 +304,33 @@ func (h *MessageHandler) handleStatsCommand(ctx context.Context, bot *tgbotapi.B
 	return h.sendMessage(bot, message.Chat.ID, statsText)
 }
 
-func (h *MessageHandler) handleTextMessage(ctx context.Context, bot *tgbotapi.BotAPI, message *tgbotapi.Message, user *models.User) error {
+func (h *MessageHandler) handleTextMessage(ctx context.Context, bot botinterface.BotAPI, message *tgbotapi.Message, user *models.User) error {
+	if h.contextManager != nil && strings.TrimSpace(message.Text) != "" {
+		sessionID := fmt.Sprintf("chat-%d", message.Chat.ID)
+		locale := ""
+		if message.From != nil {
+			locale = message.From.LanguageCode
+		}
+
+		state, err := h.contextManager.ProcessMessage(ctx, service.ProcessMessageInput{
+			UserID:    user.ID,
+			SessionID: sessionID,
+			Role:      "user",
+			Message:   message.Text,
+			Channel:   "telegram",
+			Locale:    locale,
+		})
+		if err != nil {
+			logger.Warnf("更新对话上下文失败: %v", err)
+		} else {
+			ctx = context.WithValue(ctx, conversationContextKey{}, state)
+		}
+	}
+
+	if h.suggestionService != nil && shouldTriggerSuggestion(message.Text) {
+		return h.handleSuggestionRequest(ctx, bot, message, user)
+	}
+
 	// 如果启用了AI服务，优先使用AI解析
 	if h.aiParserService != nil {
 		logger.Infof("使用AI解析器处理用户 %d 的消息", user.ID)
@@ -291,7 +343,7 @@ func (h *MessageHandler) handleTextMessage(ctx context.Context, bot *tgbotapi.Bo
 }
 
 // handleWithAI 使用AI解析器处理消息
-func (h *MessageHandler) handleWithAI(ctx context.Context, bot *tgbotapi.BotAPI, message *tgbotapi.Message, user *models.User) error {
+func (h *MessageHandler) handleWithAI(ctx context.Context, bot botinterface.BotAPI, message *tgbotapi.Message, user *models.User) error {
 	// 调用AI解析服务
 	userIDStr := fmt.Sprintf("%d", user.TelegramID)
 	parseResult, err := h.aiParserService.ParseMessage(ctx, userIDStr, message.Text)
@@ -337,7 +389,7 @@ func (h *MessageHandler) handleWithAI(ctx context.Context, bot *tgbotapi.BotAPI,
 }
 
 // handleWithLegacyParser 使用传统解析器处理消息
-func (h *MessageHandler) handleWithLegacyParser(ctx context.Context, bot *tgbotapi.BotAPI, message *tgbotapi.Message, user *models.User) error {
+func (h *MessageHandler) handleWithLegacyParser(ctx context.Context, bot botinterface.BotAPI, message *tgbotapi.Message, user *models.User) error {
 	// 尝试解析提醒创建请求
 	reminder, err := h.reminderService.ParseReminderFromText(ctx, message.Text, user.ID)
 	if err != nil {
@@ -360,7 +412,7 @@ func (h *MessageHandler) handleWithLegacyParser(ctx context.Context, bot *tgbota
 }
 
 // handleReminderIntent 处理提醒创建意图
-func (h *MessageHandler) handleReminderIntent(ctx context.Context, bot *tgbotapi.BotAPI, message *tgbotapi.Message, user *models.User, parseResult *ai.ParseResult) error {
+func (h *MessageHandler) handleReminderIntent(ctx context.Context, bot botinterface.BotAPI, message *tgbotapi.Message, user *models.User, parseResult *ai.ParseResult) error {
 	if parseResult.Reminder == nil {
 		logger.Error("提醒意图但缺少提醒信息")
 		return h.sendErrorMessage(bot, message.Chat.ID, "抱歉，无法提取提醒信息，请重新描述")
@@ -407,7 +459,7 @@ func (h *MessageHandler) handleReminderIntent(ctx context.Context, bot *tgbotapi
 }
 
 // handleDeleteIntent 处理删除意图
-func (h *MessageHandler) handleDeleteIntent(ctx context.Context, bot *tgbotapi.BotAPI, message *tgbotapi.Message, user *models.User, parseResult *ai.ParseResult) error {
+func (h *MessageHandler) handleDeleteIntent(ctx context.Context, bot botinterface.BotAPI, message *tgbotapi.Message, user *models.User, parseResult *ai.ParseResult) error {
 	if parseResult.Delete == nil {
 		return h.sendMessage(bot, message.Chat.ID, "❓ 你想删除哪个提醒呢？请描述提醒的名称或时间。")
 	}
@@ -452,7 +504,7 @@ func (h *MessageHandler) handleDeleteIntent(ctx context.Context, bot *tgbotapi.B
 }
 
 // handleEditIntent 处理编辑意图
-func (h *MessageHandler) handleEditIntent(ctx context.Context, bot *tgbotapi.BotAPI, message *tgbotapi.Message, user *models.User, parseResult *ai.ParseResult) error {
+func (h *MessageHandler) handleEditIntent(ctx context.Context, bot botinterface.BotAPI, message *tgbotapi.Message, user *models.User, parseResult *ai.ParseResult) error {
 	if parseResult.Edit == nil {
 		return h.sendMessage(bot, message.Chat.ID, "❓ 你想修改哪个提醒？请提供提醒名称或时间。")
 	}
@@ -532,7 +584,7 @@ func (h *MessageHandler) handleEditIntent(ctx context.Context, bot *tgbotapi.Bot
 }
 
 // handlePauseIntent 处理暂停意图（预留）
-func (h *MessageHandler) handlePauseIntent(ctx context.Context, bot *tgbotapi.BotAPI, message *tgbotapi.Message, user *models.User, parseResult *ai.ParseResult) error {
+func (h *MessageHandler) handlePauseIntent(ctx context.Context, bot botinterface.BotAPI, message *tgbotapi.Message, user *models.User, parseResult *ai.ParseResult) error {
 	if parseResult.Pause == nil {
 		return h.sendMessage(bot, message.Chat.ID, "❓ 需要告诉我要暂停哪个提醒，以及暂停多久哦。")
 	}
@@ -592,7 +644,7 @@ func (h *MessageHandler) handlePauseIntent(ctx context.Context, bot *tgbotapi.Bo
 }
 
 // handleResumeIntent 处理恢复意图（预留）
-func (h *MessageHandler) handleResumeIntent(ctx context.Context, bot *tgbotapi.BotAPI, message *tgbotapi.Message, user *models.User, parseResult *ai.ParseResult) error {
+func (h *MessageHandler) handleResumeIntent(ctx context.Context, bot botinterface.BotAPI, message *tgbotapi.Message, user *models.User, parseResult *ai.ParseResult) error {
 	if parseResult.Resume == nil {
 		return h.sendMessage(bot, message.Chat.ID, "❓ 请告诉我要恢复哪个提醒。")
 	}
@@ -638,34 +690,40 @@ func (h *MessageHandler) handleResumeIntent(ctx context.Context, bot *tgbotapi.B
 }
 
 // handleChatIntent 处理对话意图
-func (h *MessageHandler) handleChatIntent(ctx context.Context, bot *tgbotapi.BotAPI, message *tgbotapi.Message, user *models.User, parseResult *ai.ParseResult) error {
+func (h *MessageHandler) handleChatIntent(ctx context.Context, bot botinterface.BotAPI, message *tgbotapi.Message, user *models.User, parseResult *ai.ParseResult) error {
 	if parseResult.ChatResponse == nil || parseResult.ChatResponse.Response == "" {
 		logger.Error("对话意图但缺少回复内容")
 		return h.sendMessage(bot, message.Chat.ID, "我在想怎么回答你...但好像有点卡住了 🤔\n\n试试问我其他问题？")
 	}
 
-	// 保存对话上下文（如果有ConversationService）
-	if h.conversationService != nil {
-		// 构造对话上下文数据
+	// 保存对话上下文
+	if h.contextManager != nil {
+		sessionID := fmt.Sprintf("chat-%d", message.Chat.ID)
+		updateErr := h.contextManager.UpdateContextState(ctx, service.UpdateContextStateInput{
+			UserID:    user.ID,
+			SessionID: sessionID,
+			State:     "chatting",
+			Intent:    string(parseResult.Intent),
+		})
+		if updateErr != nil {
+			logger.Warnf("更新对话上下文失败: %v", updateErr)
+		}
+	} else if h.conversationService != nil {
+		// 兼容旧的对话上下文实现
 		contextData := map[string]interface{}{
 			"last_message":  message.Text,
 			"last_response": parseResult.ChatResponse.Response,
 			"timestamp":     time.Now().Unix(),
 		}
-
-		// 尝试获取现有对话
 		conversation, err := h.conversationService.GetConversation(ctx, user.ID, models.ContextTypeChat)
 		if err != nil {
 			logger.Warnf("获取对话上下文失败: %v", err)
 		}
-
 		if conversation != nil {
-			// 更新现有对话
 			if err := h.conversationService.UpdateConversation(ctx, conversation, contextData); err != nil {
 				logger.Warnf("更新对话上下文失败: %v", err)
 			}
 		} else {
-			// 创建新对话（30天有效期）
 			_, err := h.conversationService.CreateConversation(ctx, user.ID, models.ContextTypeChat, contextData, 30*24*time.Hour)
 			if err != nil {
 				logger.Warnf("创建对话上下文失败: %v", err)
@@ -675,6 +733,42 @@ func (h *MessageHandler) handleChatIntent(ctx context.Context, bot *tgbotapi.Bot
 
 	// 发送AI的回复
 	return h.sendMessage(bot, message.Chat.ID, parseResult.ChatResponse.Response)
+}
+
+func (h *MessageHandler) handleSuggestionRequest(ctx context.Context, bot botinterface.BotAPI, message *tgbotapi.Message, user *models.User) error {
+	if h.suggestionService == nil {
+		return h.sendMessage(bot, message.Chat.ID, "建议功能暂未启用，敬请期待！")
+	}
+
+	contextState := getConversationContextState(ctx)
+	suggestions, err := h.suggestionService.GenerateSuggestions(ctx, user.ID, contextState)
+	if err != nil {
+		logger.Errorf("生成提醒建议失败: %v", err)
+		return h.sendErrorMessage(bot, message.Chat.ID, "暂时无法生成建议，请稍后再试")
+	}
+
+	if len(suggestions) == 0 {
+		return h.sendMessage(bot, message.Chat.ID, "目前没有新的建议。完成一些提醒后再来试试吧！")
+	}
+
+	text := "🤖 <b>为你准备的提醒建议</b>\n\n"
+	for idx, suggestion := range suggestions {
+		text += fmt.Sprintf("%d. <b>%s</b>\n", idx+1, suggestion.Title)
+		if suggestion.SuggestedSchedule != "" {
+			text += fmt.Sprintf("   ⏰ %s\n", suggestion.SuggestedSchedule)
+		}
+		if suggestion.Description != "" {
+			text += fmt.Sprintf("   📌 %s\n", suggestion.Description)
+		}
+		if suggestion.Reason != "" {
+			text += fmt.Sprintf("   💡 %s\n", suggestion.Reason)
+		}
+		text += "\n"
+	}
+
+	text += "👏 如果其中有你需要的，告诉我我们就能快速设置起来！"
+
+	return h.sendMessage(bot, message.Chat.ID, text)
 }
 
 type reminderMatch struct {
@@ -798,7 +892,7 @@ func parsePauseDuration(raw string) time.Duration {
 	}
 }
 
-func (h *MessageHandler) handleDeleteCommand(ctx context.Context, bot *tgbotapi.BotAPI, message *tgbotapi.Message, user *models.User) error {
+func (h *MessageHandler) handleDeleteCommand(ctx context.Context, bot botinterface.BotAPI, message *tgbotapi.Message, user *models.User) error {
 	args := strings.TrimSpace(message.CommandArguments())
 	if args == "" {
 		return h.sendMessage(bot, message.Chat.ID,
@@ -835,7 +929,7 @@ func (h *MessageHandler) handleDeleteCommand(ctx context.Context, bot *tgbotapi.
 }
 
 // handleSummaryIntent 处理总结意图
-func (h *MessageHandler) handleSummaryIntent(ctx context.Context, bot *tgbotapi.BotAPI, message *tgbotapi.Message, user *models.User, parseResult *ai.ParseResult) error {
+func (h *MessageHandler) handleSummaryIntent(ctx context.Context, bot botinterface.BotAPI, message *tgbotapi.Message, user *models.User, parseResult *ai.ParseResult) error {
 	// 获取用户的提醒统计
 	stats, err := h.reminderLogService.GetUserStatistics(ctx, user.ID)
 	if err != nil {
@@ -862,7 +956,7 @@ func (h *MessageHandler) handleSummaryIntent(ctx context.Context, bot *tgbotapi.
 }
 
 // handleQueryIntent 处理查询意图
-func (h *MessageHandler) handleQueryIntent(ctx context.Context, bot *tgbotapi.BotAPI, message *tgbotapi.Message, user *models.User, parseResult *ai.ParseResult) error {
+func (h *MessageHandler) handleQueryIntent(ctx context.Context, bot botinterface.BotAPI, message *tgbotapi.Message, user *models.User, parseResult *ai.ParseResult) error {
 	// 获取用户的提醒列表
 	reminders, err := h.reminderService.GetUserReminders(ctx, user.ID)
 	if err != nil {
@@ -972,14 +1066,14 @@ func (h *MessageHandler) formatSchedule(reminder *models.Reminder) string {
 	}
 }
 
-func (h *MessageHandler) sendMessage(bot *tgbotapi.BotAPI, chatID int64, text string) error {
+func (h *MessageHandler) sendMessage(bot botinterface.BotAPI, chatID int64, text string) error {
 	msg := tgbotapi.NewMessage(chatID, text)
 	msg.ParseMode = tgbotapi.ModeHTML
 	_, err := bot.Send(msg)
 	return err
 }
 
-func (h *MessageHandler) sendErrorMessage(bot *tgbotapi.BotAPI, chatID int64, text string) error {
+func (h *MessageHandler) sendErrorMessage(bot botinterface.BotAPI, chatID int64, text string) error {
 	errorText := "⚠️ " + text
 	return h.sendMessage(bot, chatID, errorText)
 }

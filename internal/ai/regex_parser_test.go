@@ -2,6 +2,7 @@ package ai
 
 import (
 	"context"
+	"fmt"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -158,4 +159,136 @@ func TestRegexParser_Priority(t *testing.T) {
 func TestRegexParser_Name(t *testing.T) {
 	parser := NewRegexParser()
 	assert.Equal(t, "regex-parser", parser.GetName())
+}
+
+// TestParseWeekday 测试中文星期解析
+func TestParseWeekday(t *testing.T) {
+	tests := []struct {
+		weekday  string
+		expected int
+	}{
+		{"一", 1},
+		{"二", 2},
+		{"三", 3},
+		{"四", 4},
+		{"五", 5},
+		{"六", 6},
+		{"日", 0},
+		{"天", 0},
+		{"invalid", 1}, // 无效输入返回默认值1
+	}
+
+	for _, tt := range tests {
+		t.Run("weekday_"+tt.weekday, func(t *testing.T) {
+			result := parseWeekday(tt.weekday)
+			assert.Equal(t, tt.expected, result)
+		})
+	}
+}
+
+// TestNormalizeHourForPeriod 测试时间段标准化
+func TestNormalizeHourForPeriod(t *testing.T) {
+	tests := []struct {
+		name     string
+		hour     int
+		period   string
+		expected int
+	}{
+		// 下午/午后
+		{"下午3点", 3, "下午", 15},
+		{"下午12点", 12, "下午", 12}, // 12点不需要转换
+		{"下午1点", 1, "午后", 13},
+
+		// 晚上
+		{"晚上8点", 8, "晚上", 20},
+		{"晚上12点", 12, "晚上", 12}, // 12点不需要转换
+
+		// 中午
+		{"中午12点", 12, "中午", 12},
+		{"中午0点", 0, "中午", 12},
+		{"中午1点", 1, "中午", 13},
+
+		// 上午
+		{"上午8点", 8, "上午", 8},
+		{"上午12点", 12, "上午", 0}, // 上午12点是午夜0点
+
+		// 早上/早晨
+		{"早上8点", 8, "早上", 8},
+		{"早上12点", 12, "早上", 0}, // 早上12点是午夜0点
+		{"早晨7点", 7, "早晨", 7},
+		{"早晨12点", 12, "早晨", 0},
+
+		// 空period
+		{"无时段8点", 8, "", 8},
+		{"无时段15点", 15, "", 15},
+
+		// 边界值
+		{"超出范围-1", -1, "下午", -1}, // 不处理无效小时
+		{"超出范围24", 24, "下午", 24}, // 不处理无效小时
+
+		// 带空格
+		{"下午带空格", 3, "  下午  ", 15},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := normalizeHourForPeriod(tt.hour, tt.period)
+			assert.Equal(t, tt.expected, result, "时间段'%s'的%d点应该转换为%d点", tt.period, tt.hour, tt.expected)
+		})
+	}
+}
+
+// TestRegexParser_TodayReminderWithTime 测试今天提醒（包含分钟）
+func TestRegexParser_TodayReminderWithTime(t *testing.T) {
+	parser := NewRegexParser()
+	ctx := context.Background()
+
+	tests := []struct {
+		name           string
+		message        string
+		expectedHour   int
+		expectedMinute int
+	}{
+		// 注意：regex 今天 pattern 要求有分钟标记（:或点+分）
+		{"今天15:10", "今天15:10提醒我开会", 15, 10},
+		{"今天下午2:30", "今天下午2:30提醒我开会", 14, 30},
+		{"今天上午10:00", "今天上午10:00提醒我看书", 10, 0},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result, err := parser.Parse(ctx, "user1", tt.message)
+			require.NoError(t, err, "消息: %s", tt.message)
+			assert.Equal(t, tt.expectedHour, result.Reminder.Time.Hour, "小时不匹配")
+			assert.Equal(t, tt.expectedMinute, result.Reminder.Time.Minute, "分钟不匹配")
+		})
+	}
+}
+
+// TestRegexParser_WeeklyReminderAllDays 测试所有星期的解析
+func TestRegexParser_WeeklyReminderAllDays(t *testing.T) {
+	parser := NewRegexParser()
+	ctx := context.Background()
+
+	tests := []struct {
+		weekday      string
+		expectedCode string
+	}{
+		{"一", "weekly:1"},
+		{"二", "weekly:2"},
+		{"三", "weekly:3"},
+		{"四", "weekly:4"},
+		{"五", "weekly:5"},
+		{"六", "weekly:6"},
+		{"日", "weekly:0"},
+	}
+
+	for _, tt := range tests {
+		t.Run("星期"+tt.weekday, func(t *testing.T) {
+			message := fmt.Sprintf("每周%s下午3点提醒我开会", tt.weekday)
+			result, err := parser.Parse(ctx, "user1", message)
+			require.NoError(t, err)
+			assert.Equal(t, tt.expectedCode, string(result.Reminder.SchedulePattern))
+		})
+	}
 }

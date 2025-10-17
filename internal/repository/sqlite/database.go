@@ -54,6 +54,7 @@ func (d *Database) AutoMigrate() error {
 		&models.Reminder{},
 		&models.ReminderLog{},
 		&models.Conversation{},
+		&models.ConversationContext{},
 	)
 }
 

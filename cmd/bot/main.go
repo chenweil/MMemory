@@ -65,23 +65,39 @@ func main() {
 	reminderRepo := sqlite.NewReminderRepository(database.GetDB())
 	reminderLogRepo := sqlite.NewReminderLogRepository(database.GetDB())
 	conversationRepo := sqlite.NewConversationRepository(database.GetDB())
+	conversationContextRepo := sqlite.NewConversationContextRepository(database.GetDB())
 
 	// 初始化Telegram Bot（使用自定义HTTP客户端）
-	bot, err := bot.NewBotWithCustomClient(cfg.Bot.Token, cfg.Bot.Debug)
+	botAPI, err := bot.NewBotWithCustomClient(cfg.Bot.Token, cfg.Bot.Debug)
 	if err != nil {
 		logger.Fatalf("创建Telegram Bot失败: %v", err)
 	}
 
-	logger.Infof("✅ Telegram Bot 授权成功: @%s", bot.Self.UserName)
+	logger.Infof("✅ Telegram Bot 授权成功: @%s", botAPI.Self.UserName)
+
+	// 包装为接口实现（用于handlers测试）
+	botInterface := bot.NewRealBotAPI(botAPI)
 
 	// 初始化服务层
 	userService := service.NewUserService(userRepo)
 	reminderService := service.NewReminderService(reminderRepo)
 	reminderLogService := service.NewReminderLogService(reminderLogRepo, reminderRepo)
-	notificationService := service.NewNotificationService(bot)
+	notificationService := service.NewNotificationService(botAPI) // NotificationService仍使用原始BotAPI
 	schedulerService := service.NewSchedulerService(reminderRepo, reminderLogRepo, notificationService)
 	monitoringService := service.NewMonitoringService(userRepo, reminderRepo, reminderLogRepo)
 	conversationService := service.NewConversationService(conversationRepo)
+	contextManager := service.NewContextManager(
+		conversationContextRepo,
+		&service.DefaultEntityExtractor{},
+		&service.DefaultIntentTracker{},
+		service.ContextManagerConfig{},
+	)
+	suggestionService := service.NewReminderSuggestionService(
+		reminderRepo,
+		reminderLogRepo,
+		contextManager,
+		service.SuggestionServiceConfig{},
+	)
 
 	// 初始化AI服务（如果启用）
 	var aiParserService service.AIParserService
@@ -163,7 +179,7 @@ func main() {
 	}
 
 	// 初始化消息处理器
-	messageHandler := handlers.NewMessageHandler(reminderService, userService, reminderLogService, aiParserService, conversationService)
+	messageHandler := handlers.NewMessageHandler(reminderService, userService, reminderLogService, aiParserService, conversationService, contextManager, suggestionService)
 	callbackHandler := handlers.NewCallbackHandler(reminderService, reminderLogService, schedulerService)
 
 	// 启动调度器
@@ -208,8 +224,8 @@ func main() {
 		cancel()
 	}()
 
-	// 启动消息处理循环
-	if err := startBot(ctx, bot, messageHandler, callbackHandler); err != nil {
+	// 启动消息处理循环（传入原始BotAPI用于GetUpdatesChan，传入接口用于handlers）
+	if err := startBot(ctx, botAPI, botInterface, messageHandler, callbackHandler); err != nil {
 		logger.Fatalf("Bot运行失败: %v", err)
 	}
 
@@ -281,7 +297,7 @@ func logTelegramError(err error, operation string) {
 	}
 }
 
-func startBot(ctx context.Context, bot *tgbotapi.BotAPI, messageHandler *handlers.MessageHandler, callbackHandler *handlers.CallbackHandler) error {
+func startBot(ctx context.Context, botAPI *tgbotapi.BotAPI, botInterface bot.BotAPI, messageHandler *handlers.MessageHandler, callbackHandler *handlers.CallbackHandler) error {
 	logger.Info("🤖 Bot开始接收消息...")
 
 	maxRetries := 3
@@ -291,11 +307,11 @@ func startBot(ctx context.Context, bot *tgbotapi.BotAPI, messageHandler *handler
 		select {
 		case <-ctx.Done():
 			logger.Info("停止接收消息")
-			bot.StopReceivingUpdates()
+			botAPI.StopReceivingUpdates()
 			return nil
 
 		default:
-			if err := runUpdatesWithRetry(ctx, bot, messageHandler, callbackHandler, maxRetries, retryDelay); err != nil {
+			if err := runUpdatesWithRetry(ctx, botAPI, botInterface, messageHandler, callbackHandler, maxRetries, retryDelay); err != nil {
 				logger.Errorf("Bot运行失败，即将重试: %v", err)
 				time.Sleep(retryDelay)
 				continue
@@ -304,18 +320,18 @@ func startBot(ctx context.Context, bot *tgbotapi.BotAPI, messageHandler *handler
 	}
 }
 
-func runUpdatesWithRetry(ctx context.Context, bot *tgbotapi.BotAPI, messageHandler *handlers.MessageHandler, callbackHandler *handlers.CallbackHandler, maxRetries int, retryDelay time.Duration) error {
+func runUpdatesWithRetry(ctx context.Context, botAPI *tgbotapi.BotAPI, botInterface bot.BotAPI, messageHandler *handlers.MessageHandler, callbackHandler *handlers.CallbackHandler, maxRetries int, retryDelay time.Duration) error {
 	u := tgbotapi.NewUpdate(0)
 	u.Timeout = 30 // 减少超时时间到30秒，降低网络中断风险
 
 	// 获取更新通道 (GetUpdatesChan 不返回错误，只返回通道)
-	updates := bot.GetUpdatesChan(u)
+	updates := botAPI.GetUpdatesChan(u)
 
-	// 处理更新
-	return processUpdates(ctx, updates, bot, messageHandler, callbackHandler)
+	// 处理更新（传入接口供handlers使用）
+	return processUpdates(ctx, updates, botInterface, messageHandler, callbackHandler)
 }
 
-func processUpdates(ctx context.Context, updates tgbotapi.UpdatesChannel, bot *tgbotapi.BotAPI, messageHandler *handlers.MessageHandler, callbackHandler *handlers.CallbackHandler) error {
+func processUpdates(ctx context.Context, updates tgbotapi.UpdatesChannel, botInterface bot.BotAPI, messageHandler *handlers.MessageHandler, callbackHandler *handlers.CallbackHandler) error {
 	consecutiveErrors := 0
 	maxConsecutiveErrors := 10
 
@@ -333,19 +349,19 @@ func processUpdates(ctx context.Context, updates tgbotapi.UpdatesChannel, bot *t
 			// 重置连续错误计数
 			consecutiveErrors = 0
 
-			// 处理消息
+			// 处理消息（使用接口）
 			if update.Message != nil {
 				go func(msg *tgbotapi.Message) {
-					if err := messageHandler.HandleMessage(ctx, bot, msg); err != nil {
+					if err := messageHandler.HandleMessage(ctx, botInterface, msg); err != nil {
 						logTelegramError(err, "处理消息")
 					}
 				}(update.Message)
 			}
 
-			// 处理回调查询
+			// 处理回调查询（使用接口）
 			if update.CallbackQuery != nil {
 				go func(callback *tgbotapi.CallbackQuery) {
-					if err := callbackHandler.HandleCallback(ctx, bot, callback); err != nil {
+					if err := callbackHandler.HandleCallback(ctx, botInterface, callback); err != nil {
 						logTelegramError(err, "处理回调")
 					}
 				}(update.CallbackQuery)

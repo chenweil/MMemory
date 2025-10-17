@@ -89,3 +89,17 @@ type ConversationService interface {
 	// GetContextData 获取上下文数据
 	GetContextData(ctx context.Context, userID uint, contextType models.ContextType, target interface{}) error
 }
+
+// ContextManagerService 上下文管理接口
+type ContextManagerService interface {
+	ProcessMessage(ctx context.Context, input ProcessMessageInput) (*models.ConversationContextState, error)
+	GetContext(ctx context.Context, userID uint) (*models.ConversationContextState, error)
+	UpdateContextState(ctx context.Context, input UpdateContextStateInput) error
+	ClearContext(ctx context.Context, userID uint) error
+	CleanupExpired(ctx context.Context) error
+}
+
+// ReminderSuggestionService 建议服务接口
+type ReminderSuggestionService interface {
+	GenerateSuggestions(ctx context.Context, userID uint, contextState *models.ConversationContextState) ([]ReminderSuggestion, error)
+}

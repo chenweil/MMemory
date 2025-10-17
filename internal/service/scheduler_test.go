@@ -324,6 +324,16 @@ func (m *mockReminderLogRepository) Delete(ctx context.Context, id uint) error {
 	return nil
 }
 
+func (m *mockReminderLogRepository) GetUserLogs(ctx context.Context, userID uint, since time.Time) ([]*models.ReminderLog, error) {
+	var result []*models.ReminderLog
+	for _, log := range m.logs {
+		if log.ScheduledTime.After(since) || log.ScheduledTime.Equal(since) {
+			result = append(result, log)
+		}
+	}
+	return result, nil
+}
+
 // TestScheduler_OnceReminder_PastTime 测试过期时间的once提醒
 func TestScheduler_OnceReminder_PastTime(t *testing.T) {
 	mockReminderRepo := newMockReminderRepository()

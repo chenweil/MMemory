@@ -2,6 +2,8 @@ package interfaces
 
 import (
 	"context"
+	"time"
+
 	"mmemory/internal/models"
 )
 
@@ -34,6 +36,7 @@ type ReminderLogRepository interface {
 	GetPendingLogs(ctx context.Context) ([]*models.ReminderLog, error)
 	Update(ctx context.Context, log *models.ReminderLog) error
 	Delete(ctx context.Context, id uint) error
+	GetUserLogs(ctx context.Context, userID uint, since time.Time) ([]*models.ReminderLog, error)
 }
 
 // ConversationRepository 对话仓储接口
@@ -43,4 +46,12 @@ type ConversationRepository interface {
 	Update(ctx context.Context, conversation *models.Conversation) error
 	Delete(ctx context.Context, id uint) error
 	DeleteExpired(ctx context.Context) error
+}
+
+// ConversationContextRepository 对话上下文仓储接口
+type ConversationContextRepository interface {
+	GetByUserID(ctx context.Context, userID uint) (*models.ConversationContext, error)
+	CreateOrUpdate(ctx context.Context, ctxModel *models.ConversationContext) error
+	DeleteByUserID(ctx context.Context, userID uint) error
+	CleanupExpired(ctx context.Context, now time.Time) error
 }

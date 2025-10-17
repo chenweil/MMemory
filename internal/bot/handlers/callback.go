@@ -9,6 +9,7 @@ import (
 
 	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api/v5"
 
+	botinterface "mmemory/internal/bot"
 	"mmemory/internal/service"
 	"mmemory/pkg/logger"
 )
@@ -31,7 +32,7 @@ func NewCallbackHandler(
 	}
 }
 
-func (h *CallbackHandler) HandleCallback(ctx context.Context, bot *tgbotapi.BotAPI, callback *tgbotapi.CallbackQuery) error {
+func (h *CallbackHandler) HandleCallback(ctx context.Context, bot botinterface.BotAPI, callback *tgbotapi.CallbackQuery) error {
 	// 解析回调数据
 	parts := strings.Split(callback.Data, "_")
 	if len(parts) < 3 {
@@ -72,7 +73,7 @@ func (h *CallbackHandler) HandleCallback(ctx context.Context, bot *tgbotapi.BotA
 	}
 }
 
-func (h *CallbackHandler) handleComplete(ctx context.Context, bot *tgbotapi.BotAPI, callback *tgbotapi.CallbackQuery, logID uint) error {
+func (h *CallbackHandler) handleComplete(ctx context.Context, bot botinterface.BotAPI, callback *tgbotapi.CallbackQuery, logID uint) error {
 	// 获取提醒记录
 	log, err := h.reminderLogService.GetByID(ctx, logID)
 	if err != nil {
@@ -99,7 +100,7 @@ func (h *CallbackHandler) handleComplete(ctx context.Context, bot *tgbotapi.BotA
 	return h.sendCallbackResponse(bot, callback.ID, "✅ 已标记为完成")
 }
 
-func (h *CallbackHandler) handleDelay(ctx context.Context, bot *tgbotapi.BotAPI, callback *tgbotapi.CallbackQuery, logID uint, hours int) error {
+func (h *CallbackHandler) handleDelay(ctx context.Context, bot botinterface.BotAPI, callback *tgbotapi.CallbackQuery, logID uint, hours int) error {
 	// 获取提醒记录
 	log, err := h.reminderLogService.GetByID(ctx, logID)
 	if err != nil {
@@ -128,7 +129,7 @@ func (h *CallbackHandler) handleDelay(ctx context.Context, bot *tgbotapi.BotAPI,
 	return h.sendCallbackResponse(bot, callback.ID, fmt.Sprintf("⏰ 已延期%d小时", hours))
 }
 
-func (h *CallbackHandler) handleSkip(ctx context.Context, bot *tgbotapi.BotAPI, callback *tgbotapi.CallbackQuery, logID uint) error {
+func (h *CallbackHandler) handleSkip(ctx context.Context, bot botinterface.BotAPI, callback *tgbotapi.CallbackQuery, logID uint) error {
 	// 获取提醒记录
 	log, err := h.reminderLogService.GetByID(ctx, logID)
 	if err != nil {
@@ -155,7 +156,7 @@ func (h *CallbackHandler) handleSkip(ctx context.Context, bot *tgbotapi.BotAPI, 
 	return h.sendCallbackResponse(bot, callback.ID, "😴 已跳过")
 }
 
-func (h *CallbackHandler) handleReminderDelete(ctx context.Context, bot *tgbotapi.BotAPI, callback *tgbotapi.CallbackQuery, reminderID uint) error {
+func (h *CallbackHandler) handleReminderDelete(ctx context.Context, bot botinterface.BotAPI, callback *tgbotapi.CallbackQuery, reminderID uint) error {
 	if reminderID == 0 {
 		return h.sendCallbackResponse(bot, callback.ID, "❌ 无效的提醒ID")
 	}
@@ -176,7 +177,7 @@ func (h *CallbackHandler) handleReminderDelete(ctx context.Context, bot *tgbotap
 	return h.sendCallbackResponse(bot, callback.ID, "✅ 删除成功")
 }
 
-func (h *CallbackHandler) handleReminderPause(ctx context.Context, bot *tgbotapi.BotAPI, callback *tgbotapi.CallbackQuery, reminderID uint) error {
+func (h *CallbackHandler) handleReminderPause(ctx context.Context, bot botinterface.BotAPI, callback *tgbotapi.CallbackQuery, reminderID uint) error {
 	if reminderID == 0 {
 		return h.sendCallbackResponse(bot, callback.ID, "❌ 无效的提醒ID")
 	}
@@ -205,7 +206,7 @@ func (h *CallbackHandler) handleReminderPause(ctx context.Context, bot *tgbotapi
 	return h.sendCallbackResponse(bot, callback.ID, "⏸️ 已暂停")
 }
 
-func (h *CallbackHandler) handleReminderResume(ctx context.Context, bot *tgbotapi.BotAPI, callback *tgbotapi.CallbackQuery, reminderID uint) error {
+func (h *CallbackHandler) handleReminderResume(ctx context.Context, bot botinterface.BotAPI, callback *tgbotapi.CallbackQuery, reminderID uint) error {
 	if reminderID == 0 {
 		return h.sendCallbackResponse(bot, callback.ID, "❌ 无效的提醒ID")
 	}
@@ -228,7 +229,7 @@ func (h *CallbackHandler) handleReminderResume(ctx context.Context, bot *tgbotap
 	return h.sendCallbackResponse(bot, callback.ID, "▶️ 已恢复")
 }
 
-func (h *CallbackHandler) handleReminderEdit(ctx context.Context, bot *tgbotapi.BotAPI, callback *tgbotapi.CallbackQuery, reminderID uint) error {
+func (h *CallbackHandler) handleReminderEdit(ctx context.Context, bot botinterface.BotAPI, callback *tgbotapi.CallbackQuery, reminderID uint) error {
 	if reminderID == 0 {
 		return h.sendCallbackResponse(bot, callback.ID, "❌ 无效的提醒ID")
 	}
@@ -278,13 +279,13 @@ func (h *CallbackHandler) handleReminderEdit(ctx context.Context, bot *tgbotapi.
 	return h.sendCallbackResponse(bot, callback.ID, "📝 请通过文字描述你的修改")
 }
 
-func (h *CallbackHandler) sendCallbackResponse(bot *tgbotapi.BotAPI, callbackID, text string) error {
+func (h *CallbackHandler) sendCallbackResponse(bot botinterface.BotAPI, callbackID, text string) error {
 	callback := tgbotapi.NewCallback(callbackID, text)
 	_, err := bot.Request(callback)
 	return err
 }
 
-func (h *CallbackHandler) editMessage(bot *tgbotapi.BotAPI, message *tgbotapi.Message, newText string) error {
+func (h *CallbackHandler) editMessage(bot botinterface.BotAPI, message *tgbotapi.Message, newText string) error {
 	edit := tgbotapi.NewEditMessageText(message.Chat.ID, message.MessageID, newText)
 	edit.ParseMode = tgbotapi.ModeHTML
 	edit.ReplyMarkup = nil // 移除键盘
