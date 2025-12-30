@@ -22,6 +22,7 @@ type Config struct {
 	App       AppConfig       `mapstructure:"app"`
 	Monitoring MonitoringConfig `mapstructure:"monitoring"`
 	AI        AIConfig        `mapstructure:"ai"`
+	Weather   WeatherConfig   `mapstructure:"weather"`
 }
 
 type BotConfig struct {
@@ -37,10 +38,15 @@ type WebhookConfig struct {
 }
 
 type DatabaseConfig struct {
-	Driver       string `mapstructure:"driver"`
-	DSN          string `mapstructure:"dsn"`
-	MaxOpenConns int    `mapstructure:"max_open_conns"`
-	MaxIdleConns int    `mapstructure:"max_idle_conns"`
+	Driver         string `mapstructure:"driver"`
+	DSN            string `mapstructure:"dsn"`
+	MaxOpenConns   int           `mapstructure:"max_open_conns"`
+	MaxIdleConns   int           `mapstructure:"max_idle_conns"`
+	ConnMaxLifetime time.Duration `mapstructure:"conn_max_lifetime"` // 连接最大生命周期
+	ConnMaxIdleTime time.Duration `mapstructure:"conn_max_idle_time"` // 连接最大空闲时间
+	MaxConnLifetime time.Duration `mapstructure:"max_conn_lifetime"` // 最大连接生命周期
+	HealthCheckInterval time.Duration `mapstructure:"health_check_interval"` // 健康检查间隔
+	PoolWarmupSize int           `mapstructure:"pool_warmup_size"` // 连接池预热大小
 }
 
 type ServerConfig struct {
@@ -49,8 +55,12 @@ type ServerConfig struct {
 }
 
 type SchedulerConfig struct {
-	Timezone   string `mapstructure:"timezone"`
-	MaxWorkers int    `mapstructure:"max_workers"`
+	Timezone           string        `mapstructure:"timezone"`
+	MaxWorkers         int           `mapstructure:"max_workers"`
+	MinWorkers         int           `mapstructure:"min_workers"`             // 最小工作线程数
+	WorkQueueSize      int           `mapstructure:"work_queue_size"`         // 工作队列大小
+	HealthCheckInterval time.Duration `mapstructure:"health_check_interval"`  // 健康检查间隔
+	TaskTimeout        time.Duration `mapstructure:"task_timeout"`            // 任务执行超时
 }
 
 type LoggingConfig struct {
@@ -73,9 +83,27 @@ type MonitoringConfig struct {
 }
 
 type AIConfig struct {
-	Enabled bool           `mapstructure:"enabled"`
-	OpenAI  OpenAIConfig   `mapstructure:"openai"`
-	Prompts PromptsConfig  `mapstructure:"prompts"`
+	Enabled           bool                        `mapstructure:"enabled"`
+	PrimaryProvider   string                      `mapstructure:"primary_provider"`
+	FallbackProviders []string                    `mapstructure:"fallback_providers"`
+	Providers        map[string]ProviderConfig     `mapstructure:"providers"`
+	Cache           CacheConfig                  `mapstructure:"cache"`
+	CircuitBreaker  CircuitBreakerConfig         `mapstructure:"circuit_breaker"`
+	CostControl     CostControlConfig            `mapstructure:"cost_control"`
+	OpenAI          OpenAIConfig                `mapstructure:"openai"`
+	Prompts         PromptsConfig               `mapstructure:"prompts"`
+}
+
+// CostControlConfig 成本控制配置
+type CostControlConfig struct {
+	Enabled           bool          `mapstructure:"enabled"`
+	MonthlyBudget     float64       `mapstructure:"monthly_budget"`
+	DailyBudget       float64       `mapstructure:"daily_budget"`
+	UserBudget        float64       `mapstructure:"user_budget"`
+	AlertThreshold    float64       `mapstructure:"alert_threshold"`     // 告警阈值，如0.8表示80%
+	WarningThreshold  float64       `mapstructure:"warning_threshold"`   // 警告阈值，如0.6表示60%
+	AutoOptimization  bool          `mapstructure:"auto_optimization"`   // 是否自动优化
+	PredictionEnabled bool          `mapstructure:"prediction_enabled"`  // 是否启用成本预测
 }
 
 type OpenAIConfig struct {
@@ -92,6 +120,50 @@ type OpenAIConfig struct {
 type PromptsConfig struct {
 	ReminderParse string `mapstructure:"reminder_parse"`
 	ChatResponse  string `mapstructure:"chat_response"`
+}
+
+// ProviderConfig Provider配置（多Provider用）
+type ProviderConfig struct {
+	Name         string        `mapstructure:"name"`
+	Endpoint     string        `mapstructure:"endpoint"`
+	APIKey       string        `mapstructure:"api_key"`
+	Model        string        `mapstructure:"model"`
+	MaxTokens    int           `mapstructure:"max_tokens"`
+	Temperature  float64       `mapstructure:"temperature"`
+	Timeout      time.Duration `mapstructure:"timeout"`
+	RateLimit    int           `mapstructure:"rate_limit"`
+}
+
+// CacheConfig 缓存配置
+type CacheConfig struct {
+	Enabled  bool          `mapstructure:"enabled"`
+	TTL      time.Duration `mapstructure:"ttl"`
+	MaxSize  int           `mapstructure:"max_size"`
+}
+
+// CircuitBreakerConfig 熔断器配置
+type CircuitBreakerConfig struct {
+	FailureThreshold int           `mapstructure:"failure_threshold"`
+	SuccessThreshold int           `mapstructure:"success_threshold"`
+	Timeout         time.Duration `mapstructure:"timeout"`
+}
+
+type WeatherConfig struct {
+	Enabled  bool            `mapstructure:"enabled"`
+	Provider WeatherProvider `mapstructure:"provider"`
+	Timeout  time.Duration   `mapstructure:"timeout"`
+	MaxRetries int           `mapstructure:"max_retries"`
+}
+
+type WeatherProvider struct {
+	Provider string        `mapstructure:"provider"`
+	QWeather QWeatherConfig `mapstructure:"qweather"`
+}
+
+type QWeatherConfig struct {
+	APIKey   string `mapstructure:"api_key"`
+	BaseURL  string `mapstructure:"base_url"`
+	Timeout  time.Duration `mapstructure:"timeout"`
 }
 
 // ConfigWatcher 配置监听器接口
@@ -214,12 +286,21 @@ func (cm *ConfigManager) setDefaults() {
 	cm.viper.SetDefault("database.dsn", "./data/mmemory.db")
 	cm.viper.SetDefault("database.max_open_conns", 25)
 	cm.viper.SetDefault("database.max_idle_conns", 10)
+	cm.viper.SetDefault("database.conn_max_lifetime", "5m")
+	cm.viper.SetDefault("database.conn_max_idle_time", "1m")
+	cm.viper.SetDefault("database.max_conn_lifetime", "30m")
+	cm.viper.SetDefault("database.health_check_interval", "1m")
+	cm.viper.SetDefault("database.pool_warmup_size", 5)
 	
 	cm.viper.SetDefault("server.port", "8080")
 	cm.viper.SetDefault("server.host", "0.0.0.0")
 	
 	cm.viper.SetDefault("scheduler.timezone", "Asia/Shanghai")
 	cm.viper.SetDefault("scheduler.max_workers", 10)
+	cm.viper.SetDefault("scheduler.min_workers", 2)
+	cm.viper.SetDefault("scheduler.work_queue_size", 100)
+	cm.viper.SetDefault("scheduler.health_check_interval", "1m")
+	cm.viper.SetDefault("scheduler.task_timeout", "30s")
 	
 	cm.viper.SetDefault("logging.level", "info")
 	cm.viper.SetDefault("logging.format", "json")
@@ -236,6 +317,16 @@ func (cm *ConfigManager) setDefaults() {
 	
 	// AI配置默认值
 	cm.viper.SetDefault("ai.enabled", false)
+
+	// 成本控制配置默认值
+	cm.viper.SetDefault("ai.cost_control.enabled", true)
+	cm.viper.SetDefault("ai.cost_control.monthly_budget", 100.0)
+	cm.viper.SetDefault("ai.cost_control.daily_budget", 3.33) // 月预算/30
+	cm.viper.SetDefault("ai.cost_control.user_budget", 10.0)
+	cm.viper.SetDefault("ai.cost_control.alert_threshold", 0.9)
+	cm.viper.SetDefault("ai.cost_control.warning_threshold", 0.6)
+	cm.viper.SetDefault("ai.cost_control.auto_optimization", true)
+	cm.viper.SetDefault("ai.cost_control.prediction_enabled", true)
 	cm.viper.SetDefault("ai.openai.base_url", "https://api.openai.com/v1")
 	cm.viper.SetDefault("ai.openai.primary_model", "gpt-4o-mini")
 	cm.viper.SetDefault("ai.openai.backup_model", "gpt-3.5-turbo")
@@ -243,6 +334,14 @@ func (cm *ConfigManager) setDefaults() {
 	cm.viper.SetDefault("ai.openai.max_tokens", 1000)
 	cm.viper.SetDefault("ai.openai.timeout", "30s")
 	cm.viper.SetDefault("ai.openai.max_retries", 3)
+
+	// 天气服务配置默认值
+	cm.viper.SetDefault("weather.enabled", false)
+	cm.viper.SetDefault("weather.provider.provider", "qweather")
+	cm.viper.SetDefault("weather.timeout", "10s")
+	cm.viper.SetDefault("weather.max_retries", 3)
+	cm.viper.SetDefault("weather.provider.qweather.base_url", "https://devapi.qweather.com/v7")
+	cm.viper.SetDefault("weather.provider.qweather.timeout", "5s")
 }
 
 // GetConfig 获取当前配置
@@ -405,6 +504,27 @@ func (cm *ConfigManager) validate(config *Config) error {
 
 		if config.Monitoring.Path == "" {
 			errors = append(errors, "监控路径不能为空")
+		}
+	}
+
+	// 验证天气服务配置
+	if config.Weather.Enabled {
+		if config.Weather.Provider.Provider == "qweather" {
+			// 开发环境跳过API Key验证，允许使用模拟数据
+			if config.App.Environment != "development" && config.Weather.Provider.QWeather.APIKey == "" {
+				errors = append(errors, "和风天气API Key不能为空")
+			}
+			if config.Weather.Provider.QWeather.BaseURL == "" {
+				errors = append(errors, "和风天气BaseURL不能为空")
+			}
+		}
+
+		if config.Weather.Timeout <= 0 {
+			errors = append(errors, "天气服务超时时间必须大于0")
+		}
+
+		if config.Weather.MaxRetries < 0 {
+			errors = append(errors, "天气服务重试次数不能为负数")
 		}
 	}
 

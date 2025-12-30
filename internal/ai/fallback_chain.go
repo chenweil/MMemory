@@ -46,8 +46,14 @@ func NewFallbackChain(parsers []Parser) *FallbackChain {
 	}
 }
 
-// Parse 执行降级解析
+// Parse 执行降级解析（兼容旧接口）
 func (f *FallbackChain) Parse(ctx context.Context, userID string, message string) (*ai.ParseResult, error) {
+	// 调用带上下文的解析，传入空的历史
+	return f.ParseWithContext(ctx, userID, message, "")
+}
+
+// ParseWithContext 执行带上下文的降级解析（新接口）
+func (f *FallbackChain) ParseWithContext(ctx context.Context, userID string, message string, conversationHistory string) (*ai.ParseResult, error) {
 	f.stats.mu.Lock()
 	f.stats.TotalRequests++
 	f.stats.mu.Unlock()
@@ -67,7 +73,7 @@ func (f *FallbackChain) Parse(ctx context.Context, userID string, message string
 			continue
 		}
 
-		logger.Infof("Attempting to parse with %s (priority: %d)", parserName, parser.GetPriority())
+		logger.Infof("Attempting to parse with %s (priority: %d), with context: %v", parserName, parser.GetPriority(), conversationHistory != "")
 
 		// 设置超时
 		parseCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
@@ -75,7 +81,23 @@ func (f *FallbackChain) Parse(ctx context.Context, userID string, message string
 
 		// 执行解析
 		start := time.Now()
-		result, err := parser.Parse(parseCtx, userID, message)
+		var result *ai.ParseResult
+		var err error
+
+		// 优先使用带上下文的解析
+		if conversationHistory != "" {
+			// 尝试调用带上下文的解析方法
+			if contextParser, ok := parser.(interface{ ParseWithContext(context.Context, string, string, string) (*ai.ParseResult, error) }); ok {
+				result, err = contextParser.ParseWithContext(parseCtx, userID, message, conversationHistory)
+			} else {
+				// 如果解析器不支持上下文，退回到普通解析
+				result, err = parser.Parse(parseCtx, userID, message)
+			}
+		} else {
+			// 没有上下文，使用普通解析
+			result, err = parser.Parse(parseCtx, userID, message)
+		}
+
 		duration := time.Since(start)
 
 		if err == nil && result != nil {
@@ -99,7 +121,7 @@ func (f *FallbackChain) Parse(ctx context.Context, userID string, message string
 	if lastErr != nil {
 		return nil, fmt.Errorf("all parsers failed, last error: %w", lastErr)
 	}
-	return nil, fmt.Errorf("all parsers failed with unknown errors")
+	return nil, fmt.Errorf("all parsers failed, no error details available")
 }
 
 // recordSuccess 记录成功

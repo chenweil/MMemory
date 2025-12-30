@@ -1,13 +1,13 @@
 {
   "dashboard": {
     "id": null,
-    "title": "MMemory 监控面板",
-    "tags": ["mmemory", "telegram", "bot"],
+    "title": "MMemory 性能监控面板",
+    "tags": ["mmemory", "telegram", "bot", "performance"],
     "style": "dark",
     "timezone": "Asia/Shanghai",
     "editable": true,
     "hideControls": false,
-    "graphTooltip": 0,
+    "graphTooltip": 1,
     "time": {
       "from": "now-1h",
       "to": "now"
@@ -17,8 +17,8 @@
       "time_options": ["5m", "15m", "1h", "6h", "12h", "24h", "2d", "7d", "30d"]
     },
     "refresh": "30s",
-    "schemaVersion": 16,
-    "version": 0,
+    "schemaVersion": 38,
+    "version": 5,
     "links": [],
     "panels": [
       {
@@ -61,14 +61,14 @@
         },
         "gridPos": {
           "h": 4,
-          "w": 6,
+          "w": 4,
           "x": 0,
           "y": 1
         }
       },
       {
         "id": 3,
-        "title": "注册用户总数",
+        "title": "注册用户",
         "type": "stat",
         "targets": [
           {
@@ -94,14 +94,14 @@
         },
         "gridPos": {
           "h": 4,
-          "w": 6,
-          "x": 6,
+          "w": 4,
+          "x": 4,
           "y": 1
         }
       },
       {
         "id": 4,
-        "title": "活跃提醒数",
+        "title": "活跃提醒",
         "type": "stat",
         "targets": [
           {
@@ -127,14 +127,14 @@
         },
         "gridPos": {
           "h": 4,
-          "w": 6,
-          "x": 12,
+          "w": 4,
+          "x": 8,
           "y": 1
         }
       },
       {
         "id": 5,
-        "title": "调度任务数",
+        "title": "调度任务",
         "type": "stat",
         "targets": [
           {
@@ -160,54 +160,60 @@
         },
         "gridPos": {
           "h": 4,
-          "w": 6,
-          "x": 18,
+          "w": 4,
+          "x": 12,
           "y": 1
         }
       },
       {
         "id": 6,
-        "title": "消息处理",
-        "type": "row",
+        "title": "数据库连接池",
+        "type": "stat",
+        "targets": [
+          {
+            "expr": "mmemory_db_pool_size{state=\"open\"}",
+            "legendFormat": "打开连接",
+            "refId": "A"
+          }
+        ],
+        "fieldConfig": {
+          "defaults": {
+            "color": {
+              "mode": "thresholds"
+            },
+            "thresholds": {
+              "steps": [
+                {
+                  "color": "green",
+                  "value": null
+                },
+                {
+                  "color": "yellow",
+                  "value": 15
+                },
+                {
+                  "color": "red",
+                  "value": 20
+                }
+              ]
+            }
+          }
+        },
         "gridPos": {
-          "h": 1,
-          "w": 24,
-          "x": 0,
-          "y": 5
+          "h": 4,
+          "w": 4,
+          "x": 16,
+          "y": 1
         }
       },
       {
         "id": 7,
-        "title": "Bot消息处理速率",
-        "type": "graph",
-        "targets": [
-          {
-            "expr": "rate(mmemory_bot_messages_total[5m])",
-            "legendFormat": "{{type}} - {{status}}",
-            "refId": "A"
-          }
-        ],
-        "yAxes": [
-          {
-            "label": "消息数/秒",
-            "min": 0
-          }
-        ],
-        "gridPos": {
-          "h": 8,
-          "w": 12,
-          "x": 0,
-          "y": 6
-        }
-      },
-      {
-        "id": 8,
-        "title": "消息成功率",
+        "title": "缓存命中率",
         "type": "stat",
         "targets": [
           {
-            "expr": "rate(mmemory_bot_messages_total{status=\"success\"}[5m]) / rate(mmemory_bot_messages_total[5m]) * 100",
-            "legendFormat": "成功率",
+            "expr": "mmemory_cache_hits_total / (mmemory_cache_hits_total + mmemory_cache_misses_total) * 100",
+            "legendFormat": "命中率",
             "refId": "A"
           }
         ],
@@ -225,11 +231,119 @@
                 },
                 {
                   "color": "yellow",
-                  "value": 90
+                  "value": 50
                 },
                 {
                   "color": "green",
-                  "value": 99
+                  "value": 80
+                }
+              ]
+            }
+          }
+        },
+        "gridPos": {
+          "h": 4,
+          "w": 4,
+          "x": 20,
+          "y": 1
+        }
+      },
+      {
+        "id": 8,
+        "title": "数据库连接池监控",
+        "type": "row",
+        "gridPos": {
+          "h": 1,
+          "w": 24,
+          "x": 0,
+          "y": 5
+        }
+      },
+      {
+        "id": 9,
+        "title": "连接池状态",
+        "type": "graph",
+        "targets": [
+          {
+            "expr": "mmemory_db_pool_size{state=\"open\"}",
+            "legendFormat": "打开连接",
+            "refId": "A"
+          },
+          {
+            "expr": "mmemory_db_pool_size{state=\"idle\"}",
+            "legendFormat": "空闲连接",
+            "refId": "B"
+          },
+          {
+            "expr": "mmemory_db_pool_size{state=\"in_use\"}",
+            "legendFormat": "使用中",
+            "refId": "C"
+          }
+        ],
+        "yAxes": {
+          "label": "连接数",
+          "min": 0
+        },
+        "gridPos": {
+          "h": 8,
+          "w": 8,
+          "x": 0,
+          "y": 6
+        }
+      },
+      {
+        "id": 10,
+        "title": "连接池利用率",
+        "type": "graph",
+        "targets": [
+          {
+            "expr": "mmemory_db_pool_utilization_ratio * 100",
+            "legendFormat": "利用率",
+            "refId": "A"
+          }
+        ],
+        "yAxes": {
+          "label": "百分比",
+          "min": 0,
+          "max": 100
+        },
+        "gridPos": {
+          "h": 8,
+          "w": 8,
+          "x": 8,
+          "y": 6
+        }
+      },
+      {
+        "id": 11,
+        "title": "连接池健康状态",
+        "type": "gauge",
+        "targets": [
+          {
+            "expr": "mmemory_db_health_status{database=\"mmemory\"}",
+            "legendFormat": "健康状态",
+            "refId": "A"
+          }
+        ],
+        "fieldConfig": {
+          "defaults": {
+            "unit": "percent",
+            "color": {
+              "mode": "thresholds"
+            },
+            "thresholds": {
+              "steps": [
+                {
+                  "color": "red",
+                  "value": 0
+                },
+                {
+                  "color": "yellow",
+                  "value": 0.5
+                },
+                {
+                  "color": "green",
+                  "value": 1
                 }
               ]
             }
@@ -237,14 +351,14 @@
         },
         "gridPos": {
           "h": 8,
-          "w": 12,
-          "x": 12,
+          "w": 8,
+          "x": 16,
           "y": 6
         }
       },
       {
-        "id": 9,
-        "title": "提醒处理",
+        "id": 12,
+        "title": "调度器工作池监控",
         "type": "row",
         "gridPos": {
           "h": 1,
@@ -254,22 +368,25 @@
         }
       },
       {
-        "id": 10,
-        "title": "提醒创建速率",
+        "id": 13,
+        "title": "工作线程状态",
         "type": "graph",
         "targets": [
           {
-            "expr": "rate(mmemory_reminders_created_total[5m])",
-            "legendFormat": "创建速率",
+            "expr": "mmemory_scheduler_worker_count{state=\"active\"}",
+            "legendFormat": "活跃线程",
             "refId": "A"
-          }
-        ],
-        "yAxes": [
+          },
           {
-            "label": "提醒数/秒",
-            "min": 0
+            "expr": "mmemory_scheduler_worker_count{state=\"idle\"}",
+            "legendFormat": "空闲线程",
+            "refId": "B"
           }
         ],
+        "yAxes": {
+          "label": "线程数",
+          "min": 0
+        },
         "gridPos": {
           "h": 8,
           "w": 8,
@@ -278,27 +395,20 @@
         }
       },
       {
-        "id": 11,
-        "title": "提醒完成率",
+        "id": 14,
+        "title": "工作队列大小",
         "type": "graph",
         "targets": [
           {
-            "expr": "rate(mmemory_reminders_completed_total[5m])",
-            "legendFormat": "完成",
+            "expr": "mmemory_scheduler_queue_size",
+            "legendFormat": "队列大小",
             "refId": "A"
-          },
-          {
-            "expr": "rate(mmemory_reminders_skipped_total[5m])",
-            "legendFormat": "跳过",
-            "refId": "B"
           }
         ],
-        "yAxes": [
-          {
-            "label": "操作数/秒",
-            "min": 0
-          }
-        ],
+        "yAxes": {
+          "label": "任务数",
+          "min": 0
+        },
         "gridPos": {
           "h": 8,
           "w": 8,
@@ -307,27 +417,25 @@
         }
       },
       {
-        "id": 12,
-        "title": "提醒解析性能",
+        "id": 15,
+        "title": "任务执行延迟",
         "type": "graph",
         "targets": [
           {
-            "expr": "histogram_quantile(0.95, rate(mmemory_reminder_parse_duration_seconds_bucket[5m]))",
-            "legendFormat": "95分位 - {{parser_type}}",
+            "expr": "histogram_quantile(0.95, rate(mmemory_scheduler_task_latency_seconds_bucket[5m]))",
+            "legendFormat": "95分位",
             "refId": "A"
           },
           {
-            "expr": "histogram_quantile(0.50, rate(mmemory_reminder_parse_duration_seconds_bucket[5m]))",
-            "legendFormat": "50分位 - {{parser_type}}",
+            "expr": "histogram_quantile(0.50, rate(mmemory_scheduler_task_latency_seconds_bucket[5m]))",
+            "legendFormat": "50分位",
             "refId": "B"
           }
         ],
-        "yAxes": [
-          {
-            "label": "解析时间 (秒)",
-            "min": 0
-          }
-        ],
+        "yAxes": {
+          "label": "延迟 (秒)",
+          "min": 0
+        },
         "gridPos": {
           "h": 8,
           "w": 8,
@@ -336,8 +444,8 @@
         }
       },
       {
-        "id": 13,
-        "title": "性能监控",
+        "id": 16,
+        "title": "AI 成本控制",
         "type": "row",
         "gridPos": {
           "h": 1,
@@ -347,61 +455,170 @@
         }
       },
       {
-        "id": 14,
-        "title": "响应时间",
-        "type": "graph",
+        "id": 17,
+        "title": "日预算利用率",
+        "type": "gauge",
         "targets": [
           {
-            "expr": "histogram_quantile(0.95, rate(mmemory_response_duration_seconds_bucket[5m]))",
-            "legendFormat": "95分位",
+            "expr": "mmemory_ai_budget_utilization{budget_type=\"daily\"} * 100",
+            "legendFormat": "日预算",
             "refId": "A"
-          },
-          {
-            "expr": "histogram_quantile(0.50, rate(mmemory_response_duration_seconds_bucket[5m]))",
-            "legendFormat": "50分位",
-            "refId": "B"
           }
         ],
-        "yAxes": [
-          {
-            "label": "响应时间 (秒)",
-            "min": 0
+        "fieldConfig": {
+          "defaults": {
+            "unit": "percent",
+            "color": {
+              "mode": "thresholds"
+            },
+            "thresholds": {
+              "steps": [
+                {
+                  "color": "green",
+                  "value": null
+                },
+                {
+                  "color": "yellow",
+                  "value": 70
+                },
+                {
+                  "color": "red",
+                  "value": 90
+                }
+              ]
+            }
           }
-        ],
+        },
         "gridPos": {
           "h": 8,
-          "w": 12,
+          "w": 6,
           "x": 0,
           "y": 24
         }
       },
       {
-        "id": 15,
-        "title": "数据库性能",
-        "type": "graph",
+        "id": 18,
+        "title": "月预算利用率",
+        "type": "gauge",
         "targets": [
           {
-            "expr": "histogram_quantile(0.95, rate(mmemory_database_query_duration_seconds_bucket[5m]))",
-            "legendFormat": "95分位 - {{operation}}",
+            "expr": "mmemory_ai_budget_utilization{budget_type=\"monthly\"} * 100",
+            "legendFormat": "月预算",
             "refId": "A"
           }
         ],
-        "yAxes": [
-          {
-            "label": "查询时间 (秒)",
-            "min": 0
+        "fieldConfig": {
+          "defaults": {
+            "unit": "percent",
+            "color": {
+              "mode": "thresholds"
+            },
+            "thresholds": {
+              "steps": [
+                {
+                  "color": "green",
+                  "value": null
+                },
+                {
+                  "color": "yellow",
+                  "value": 70
+                },
+                {
+                  "color": "red",
+                  "value": 90
+                }
+              ]
+            }
           }
-        ],
+        },
         "gridPos": {
           "h": 8,
-          "w": 12,
+          "w": 6,
+          "x": 6,
+          "y": 24
+        }
+      },
+      {
+        "id": 19,
+        "title": "成本风险等级",
+        "type": "gauge",
+        "targets": [
+          {
+            "expr": "mmemory_ai_cost_risk_level",
+            "legendFormat": "风险等级",
+            "refId": "A"
+          }
+        ],
+        "fieldConfig": {
+          "defaults": {
+            "color": {
+              "mode": "thresholds"
+            },
+            "thresholds": {
+              "steps": [
+                {
+                  "color": "green",
+                  "value": null
+                },
+                {
+                  "color": "yellow",
+                  "value": 0.5
+                },
+                {
+                  "color": "red",
+                  "value": 1
+                }
+              ]
+            }
+          }
+        },
+        "gridPos": {
+          "h": 8,
+          "w": 6,
           "x": 12,
           "y": 24
         }
       },
       {
-        "id": 16,
-        "title": "系统资源",
+        "id": 20,
+        "title": "成本趋势",
+        "type": "stat",
+        "targets": [
+          {
+            "expr": "mmemory_ai_cost_trend",
+            "legendFormat": "趋势",
+            "refId": "A"
+          }
+        ],
+        "fieldConfig": {
+          "defaults": {
+            "color": {
+              "mode": "thresholds"
+            },
+            "thresholds": {
+              "steps": [
+                {
+                  "color": "green",
+                  "value": 0
+                },
+                {
+                  "color": "red",
+                  "value": 0
+                }
+              ]
+            }
+          }
+        },
+        "gridPos": {
+          "h": 8,
+          "w": 6,
+          "x": 18,
+          "y": 24
+        }
+      },
+      {
+        "id": 21,
+        "title": "成本预测",
         "type": "row",
         "gridPos": {
           "h": 1,
@@ -411,83 +628,62 @@
         }
       },
       {
-        "id": 17,
-        "title": "CPU使用率",
+        "id": 22,
+        "title": "未来成本预测",
         "type": "graph",
         "targets": [
           {
-            "expr": "100 - (avg by(instance) (rate(node_cpu_seconds_total{mode=\"idle\"}[5m])) * 100)",
-            "legendFormat": "CPU使用率",
+            "expr": "mmemory_ai_cost_prediction{period=\"next_day\"}",
+            "legendFormat": "明天 - {{provider}}",
             "refId": "A"
-          }
-        ],
-        "yAxes": [
+          },
           {
-            "label": "使用率 (%)",
-            "min": 0,
-            "max": 100
+            "expr": "mmemory_ai_cost_prediction{period=\"next_week\"}",
+            "legendFormat": "下周 - {{provider}}",
+            "refId": "B"
+          },
+          {
+            "expr": "mmemory_ai_cost_prediction{period=\"next_month\"}",
+            "legendFormat": "下月 - {{provider}}",
+            "refId": "C"
           }
         ],
+        "yAxes": {
+          "label": "预估成本 (USD)",
+          "min": 0
+        },
         "gridPos": {
           "h": 8,
-          "w": 8,
+          "w": 12,
           "x": 0,
           "y": 33
         }
       },
       {
-        "id": 18,
-        "title": "内存使用率",
+        "id": 23,
+        "title": "优化规则执行",
         "type": "graph",
         "targets": [
           {
-            "expr": "(node_memory_MemTotal_bytes - node_memory_MemAvailable_bytes) / node_memory_MemTotal_bytes * 100",
-            "legendFormat": "内存使用率",
+            "expr": "rate(mmemory_ai_optimization_rule_actions_total[5m])",
+            "legendFormat": "{{rule_name}} - {{action_type}}",
             "refId": "A"
           }
         ],
-        "yAxes": [
-          {
-            "label": "使用率 (%)",
-            "min": 0,
-            "max": 100
-          }
-        ],
+        "yAxes": {
+          "label": "执行次数/秒",
+          "min": 0
+        },
         "gridPos": {
           "h": 8,
-          "w": 8,
-          "x": 8,
+          "w": 12,
+          "x": 12,
           "y": 33
         }
       },
       {
-        "id": 19,
-        "title": "磁盘使用率",
-        "type": "graph",
-        "targets": [
-          {
-            "expr": "(node_filesystem_size_bytes{mountpoint=\"/\"} - node_filesystem_avail_bytes{mountpoint=\"/\"}) / node_filesystem_size_bytes{mountpoint=\"/\"} * 100",
-            "legendFormat": "磁盘使用率",
-            "refId": "A"
-          }
-        ],
-        "yAxes": [
-          {
-            "label": "使用率 (%)",
-            "min": 0,
-            "max": 100
-          }
-        ],
-        "gridPos": {
-          "h": 8,
-          "w": 8,
-          "x": 16,
-          "y": 33
-        }
-      },
-      {
-        "id": 20,
-        "title": "错误监控",
+        "id": 24,
+        "title": "查询性能监控",
         "type": "row",
         "gridPos": {
           "h": 1,
@@ -497,20 +693,14 @@
         }
       },
       {
-        "id": 21,
-        "title": "错误率趋势",
-        "type": "graph",
+        "id": 25,
+        "title": "查询耗时分布",
+        "type": "heatmap",
         "targets": [
           {
-            "expr": "rate(mmemory_errors_total[5m])",
-            "legendFormat": "{{service}} - {{operation}} - {{error_type}}",
+            "expr": "rate(mmemory_query_duration_seconds_bucket[5m])",
+            "legendFormat": "{{le}} - {{table}} - {{operation}}",
             "refId": "A"
-          }
-        ],
-        "yAxes": [
-          {
-            "label": "错误数/秒",
-            "min": 0
           }
         ],
         "gridPos": {
@@ -521,7 +711,204 @@
         }
       },
       {
-        "id": 22,
+        "id": 26,
+        "title": "慢查询计数",
+        "type": "graph",
+        "targets": [
+          {
+            "expr": "rate(mmemory_query_slow_count[5m])",
+            "legendFormat": "{{table}} - {{operation}} - {{threshold}}",
+            "refId": "A"
+          }
+        ],
+        "yAxes": {
+          "label": "慢查询数/秒",
+          "min": 0
+        },
+        "gridPos": {
+          "h": 8,
+          "w": 12,
+          "x": 12,
+          "y": 42
+        }
+      },
+      {
+        "id": 27,
+        "title": "缓存性能",
+        "type": "row",
+        "gridPos": {
+          "h": 1,
+          "w": 24,
+          "x": 0,
+          "y": 50
+        }
+      },
+      {
+        "id": 28,
+        "title": "缓存命中/未命中",
+        "type": "graph",
+        "targets": [
+          {
+            "expr": "rate(mmemory_cache_hits_total[5m])",
+            "legendFormat": "命中",
+            "refId": "A"
+          },
+          {
+            "expr": "rate(mmemory_cache_misses_total[5m])",
+            "legendFormat": "未命中",
+            "refId": "B"
+          }
+        ],
+        "yAxes": {
+          "label": "操作数/秒",
+          "min": 0
+        },
+        "gridPos": {
+          "h": 8,
+          "w": 8,
+          "x": 0,
+          "y": 51
+        }
+      },
+      {
+        "id": 29,
+        "title": "缓存大小",
+        "type": "graph",
+        "targets": [
+          {
+            "expr": "mmemory_cache_size",
+            "legendFormat": "当前大小",
+            "refId": "A"
+          }
+        ],
+        "yAxes": {
+          "label": "条目数",
+          "min": 0
+        },
+        "gridPos": {
+          "h": 8,
+          "w": 8,
+          "x": 8,
+          "y": 51
+        }
+      },
+      {
+        "id": 30,
+        "title": "缓存驱逐",
+        "type": "graph",
+        "targets": [
+          {
+            "expr": "rate(mmemory_cache_evictions_total[5m])",
+            "legendFormat": "驱逐次数",
+            "refId": "A"
+          }
+        ],
+        "yAxes": {
+          "label": "驱逐次数/秒",
+          "min": 0
+        },
+        "gridPos": {
+          "h": 8,
+          "w": 8,
+          "x": 16,
+          "y": 51
+        }
+      },
+      {
+        "id": 31,
+        "title": "消息处理",
+        "type": "row",
+        "gridPos": {
+          "h": 1,
+          "w": 24,
+          "x": 0,
+          "y": 59
+        }
+      },
+      {
+        "id": 32,
+        "title": "消息处理速率",
+        "type": "graph",
+        "targets": [
+          {
+            "expr": "rate(mmemory_bot_messages_total[5m])",
+            "legendFormat": "{{type}} - {{status}}",
+            "refId": "A"
+          }
+        ],
+        "yAxes": {
+          "label": "消息数/秒",
+          "min": 0
+        },
+        "gridPos": {
+          "h": 8,
+          "w": 12,
+          "x": 0,
+          "y": 60
+        }
+      },
+      {
+        "id": 33,
+        "title": "数据库查询性能",
+        "type": "graph",
+        "targets": [
+          {
+            "expr": "histogram_quantile(0.95, rate(mmemory_database_query_duration_seconds_bucket[5m]))",
+            "legendFormat": "95分位 - {{operation}}",
+            "refId": "A"
+          },
+          {
+            "expr": "histogram_quantile(0.50, rate(mmemory_database_query_duration_seconds_bucket[5m]))",
+            "legendFormat": "50分位 - {{operation}}",
+            "refId": "B"
+          }
+        ],
+        "yAxes": {
+          "label": "查询时间 (秒)",
+          "min": 0
+        },
+        "gridPos": {
+          "h": 8,
+          "w": 12,
+          "x": 12,
+          "y": 60
+        }
+      },
+      {
+        "id": 34,
+        "title": "错误监控",
+        "type": "row",
+        "gridPos": {
+          "h": 1,
+          "w": 24,
+          "x": 0,
+          "y": 68
+        }
+      },
+      {
+        "id": 35,
+        "title": "错误率趋势",
+        "type": "graph",
+        "targets": [
+          {
+            "expr": "rate(mmemory_errors_total[5m])",
+            "legendFormat": "{{service}} - {{operation}} - {{error_type}}",
+            "refId": "A"
+          }
+        ],
+        "yAxes": {
+          "label": "错误数/秒",
+          "min": 0
+        },
+        "gridPos": {
+          "h": 8,
+          "w": 12,
+          "x": 0,
+          "y": 69
+        }
+      },
+      {
+        "id": 36,
         "title": "服务错误分布",
         "type": "piechart",
         "targets": [
@@ -535,9 +922,320 @@
           "h": 8,
           "w": 12,
           "x": 12,
-          "y": 42
+          "y": 69
+        }
+      },
+      {
+        "id": 37,
+        "title": "查询优化器监控",
+        "type": "row",
+        "gridPos": {
+          "h": 1,
+          "w": 24,
+          "x": 0,
+          "y": 77
+        }
+      },
+      {
+        "id": 38,
+        "title": "总查询数",
+        "type": "stat",
+        "targets": [
+          {
+            "expr": "mmemory_query_optimizer_total_queries",
+            "legendFormat": "总查询数",
+            "refId": "A"
+          }
+        ],
+        "fieldConfig": {
+          "defaults": {
+            "color": {
+              "mode": "thresholds"
+            },
+            "thresholds": {
+              "steps": [
+                {
+                  "color": "green",
+                  "value": null
+                }
+              ]
+            }
+          }
+        },
+        "gridPos": {
+          "h": 4,
+          "w": 6,
+          "x": 0,
+          "y": 78
+        }
+      },
+      {
+        "id": 39,
+        "title": "慢查询数",
+        "type": "stat",
+        "targets": [
+          {
+            "expr": "mmemory_query_optimizer_slow_queries",
+            "legendFormat": "慢查询数",
+            "refId": "A"
+          }
+        ],
+        "fieldConfig": {
+          "defaults": {
+            "color": {
+              "mode": "thresholds"
+            },
+            "thresholds": {
+              "steps": [
+                {
+                  "color": "green",
+                  "value": null
+                },
+                {
+                  "color": "yellow",
+                  "value": 10
+                },
+                {
+                  "color": "red",
+                  "value": 100
+                }
+              ]
+            }
+          }
+        },
+        "gridPos": {
+          "h": 4,
+          "w": 6,
+          "x": 6,
+          "y": 78
+        }
+      },
+      {
+        "id": 40,
+        "title": "慢查询率",
+        "type": "stat",
+        "targets": [
+          {
+            "expr": "mmemory_query_optimizer_slow_queries / mmemory_query_optimizer_total_queries * 100",
+            "legendFormat": "慢查询率",
+            "refId": "A"
+          }
+        ],
+        "fieldConfig": {
+          "defaults": {
+            "unit": "percent",
+            "color": {
+              "mode": "thresholds"
+            },
+            "thresholds": {
+              "steps": [
+                {
+                  "color": "green",
+                  "value": null
+                },
+                {
+                  "color": "yellow",
+                  "value": 5
+                },
+                {
+                  "color": "red",
+                  "value": 10
+                }
+              ]
+            }
+          }
+        },
+        "gridPos": {
+          "h": 4,
+          "w": 6,
+          "x": 12,
+          "y": 78
+        }
+      },
+      {
+        "id": 41,
+        "title": "平均查询耗时",
+        "type": "stat",
+        "targets": [
+          {
+            "expr": "mmemory_query_optimizer_average_duration_seconds",
+            "legendFormat": "平均耗时",
+            "refId": "A"
+          }
+        ],
+        "fieldConfig": {
+          "defaults": {
+            "unit": "s",
+            "color": {
+              "mode": "thresholds"
+            },
+            "thresholds": {
+              "steps": [
+                {
+                  "color": "green",
+                  "value": null
+                },
+                {
+                  "color": "yellow",
+                  "value": 0.1
+                },
+                {
+                  "color": "red",
+                  "value": 0.5
+                }
+              ]
+            }
+          }
+        },
+        "gridPos": {
+          "h": 4,
+          "w": 6,
+          "x": 18,
+          "y": 78
+        }
+      },
+      {
+        "id": 42,
+        "title": "按表查询统计",
+        "type": "graph",
+        "targets": [
+          {
+            "expr": "rate(mmemory_query_optimizer_by_table_query_count[5m])",
+            "legendFormat": "{{table}}",
+            "refId": "A"
+          }
+        ],
+        "yAxes": {
+          "label": "查询数/秒",
+          "min": 0
+        },
+        "gridPos": {
+          "h": 8,
+          "w": 12,
+          "x": 0,
+          "y": 82
+        }
+      },
+      {
+        "id": 43,
+        "title": "按操作查询统计",
+        "type": "graph",
+        "targets": [
+          {
+            "expr": "rate(mmemory_query_optimizer_by_operation_query_count[5m])",
+            "legendFormat": "{{operation}}",
+            "refId": "A"
+          }
+        ],
+        "yAxes": {
+          "label": "查询数/秒",
+          "min": 0
+        },
+        "gridPos": {
+          "h": 8,
+          "w": 12,
+          "x": 12,
+          "y": 82
+        }
+      },
+      {
+        "id": 44,
+        "title": "增强缓存性能",
+        "type": "row",
+        "gridPos": {
+          "h": 1,
+          "w": 24,
+          "x": 0,
+          "y": 90
+        }
+      },
+      {
+        "id": 45,
+        "title": "缓存命中率趋势",
+        "type": "graph",
+        "targets": [
+          {
+            "expr": "rate(mmemory_enhanced_cache_hits_total[5m]) / (rate(mmemory_enhanced_cache_hits_total[5m]) + rate(mmemory_enhanced_cache_misses_total[5m])) * 100",
+            "legendFormat": "命中率",
+            "refId": "A"
+          }
+        ],
+        "yAxes": {
+          "label": "百分比",
+          "min": 0,
+          "max": 100
+        },
+        "gridPos": {
+          "h": 8,
+          "w": 12,
+          "x": 0,
+          "y": 91
+        }
+      },
+      {
+        "id": 46,
+        "title": "缓存操作延迟",
+        "type": "graph",
+        "targets": [
+          {
+            "expr": "histogram_quantile(0.95, rate(mmemory_enhanced_cache_operation_duration_seconds_bucket[5m]))",
+            "legendFormat": "95分位",
+            "refId": "A"
+          },
+          {
+            "expr": "histogram_quantile(0.50, rate(mmemory_enhanced_cache_operation_duration_seconds_bucket[5m]))",
+            "legendFormat": "50分位",
+            "refId": "B"
+          }
+        ],
+        "yAxes": {
+          "label": "延迟 (秒)",
+          "min": 0
+        },
+        "gridPos": {
+          "h": 8,
+          "w": 12,
+          "x": 12,
+          "y": 91
+        }
+      },
+      {
+        "id": 47,
+        "title": "按表查询耗时",
+        "type": "heatmap",
+        "targets": [
+          {
+            "expr": "rate(mmemory_query_optimizer_by_table_duration_seconds_bucket[5m])",
+            "legendFormat": "{{le}} - {{table}}",
+            "refId": "A"
+          }
+        ],
+        "gridPos": {
+          "h": 8,
+          "w": 12,
+          "x": 0,
+          "y": 99
+        }
+      },
+      {
+        "id": 48,
+        "title": "按操作查询耗时",
+        "type": "heatmap",
+        "targets": [
+          {
+            "expr": "rate(mmemory_query_optimizer_by_operation_duration_seconds_bucket[5m])",
+            "legendFormat": "{{le}} - {{operation}}",
+            "refId": "A"
+          }
+        ],
+        "gridPos": {
+          "h": 8,
+          "w": 12,
+          "x": 12,
+          "y": 99
         }
       }
     ]
-  }
+  },
+  "overwrite": true
 }

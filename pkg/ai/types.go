@@ -11,15 +11,19 @@ import (
 type ParseIntent string
 
 const (
-	IntentReminder ParseIntent = "reminder" // 创建提醒
-	IntentDelete   ParseIntent = "delete"   // 删除提醒
-	IntentEdit     ParseIntent = "edit"     // 编辑提醒
-	IntentPause    ParseIntent = "pause"    // 暂停提醒
-	IntentResume   ParseIntent = "resume"   // 恢复提醒
-	IntentChat     ParseIntent = "chat"     // 普通对话
-	IntentSummary  ParseIntent = "summary"  // 总结请求
-	IntentQuery    ParseIntent = "query"    // 查询提醒
-	IntentUnknown  ParseIntent = "unknown"  // 未知意图
+	IntentReminder        ParseIntent = "reminder"          // 创建提醒
+	IntentDelete          ParseIntent = "delete"            // 删除提醒
+	IntentEdit            ParseIntent = "edit"              // 编辑提醒
+	IntentPause           ParseIntent = "pause"             // 暂停提醒
+	IntentResume          ParseIntent = "resume"            // 恢复提醒
+	IntentChat            ParseIntent = "chat"              // 普通对话
+	IntentSummary         ParseIntent = "summary"           // 总结请求
+	IntentQuery           ParseIntent = "query"             // 查询提醒
+	IntentWeather         ParseIntent = "weather"           // 天气查询
+	IntentRecordActivity  ParseIntent = "record_activity"   // 记录活动
+	IntentQueryActivity   ParseIntent = "query_activity"    // 查询活动
+	IntentActivitySummary ParseIntent = "activity_summary"  // 活动统计
+	IntentUnknown         ParseIntent = "unknown"           // 未知意图
 )
 
 // IsValid 检查意图是否有效
@@ -33,6 +37,10 @@ func (i ParseIntent) IsValid() bool {
 		IntentChat,
 		IntentSummary,
 		IntentQuery,
+		IntentWeather,
+		IntentRecordActivity,
+		IntentQueryActivity,
+		IntentActivitySummary,
 		IntentUnknown:
 		return true
 	default:
@@ -65,6 +73,15 @@ type ParseResult struct {
 
 	// 恢复相关
 	Resume *ResumeInfo `json:"resume,omitempty"`
+
+	// 天气相关（当Intent为weather时）
+	Weather *WeatherInfo `json:"weather,omitempty"`
+
+	// 活动记录相关（当Intent为record_activity时）
+	RecordActivity *ActivityRecordInfo `json:"record_activity,omitempty"`
+
+	// 活动查询相关（当Intent为query_activity时）
+	QueryActivity *ActivityQueryInfo `json:"query_activity,omitempty"`
 
 	// 对话相关（当Intent为chat时）
 	ChatResponse *ChatInfo `json:"chat_response,omitempty"`
@@ -127,6 +144,25 @@ type PauseInfo struct {
 // ResumeInfo 恢复提醒信息
 type ResumeInfo struct {
 	Keywords []string `json:"keywords"`
+}
+
+// WeatherInfo 天气查询信息
+type WeatherInfo struct {
+	Location string `json:"location"`       // 位置，如"北京"
+	Date     string `json:"date,omitempty"` // 日期，如"今天"、"明天"
+}
+
+// ActivityRecordInfo 活动记录信息
+type ActivityRecordInfo struct {
+	ActivityType string                 `json:"activity_type"` // "drink_water", "read_book" 等
+	Details      map[string]interface{} `json:"details"`       // 活动详情
+}
+
+// ActivityQueryInfo 活动查询信息
+type ActivityQueryInfo struct {
+	QueryType    string `json:"query_type"`              // "by_type", "by_time", "statistics"
+	ActivityType string `json:"activity_type,omitempty"` // 活动类型
+	TimeRange    string `json:"time_range,omitempty"`    // "今天", "昨天", "最近7天", "这周"
 }
 
 // ChatResponse 对话响应（用于Chat接口）
@@ -250,6 +286,24 @@ func (pr *ParseResult) Validate() ValidationResult {
 			errors = append(errors, "resume info is required for resume intent")
 		} else {
 			errors = append(errors, pr.validateResumeInfo()...)
+		}
+	case IntentWeather:
+		if pr.Weather == nil {
+			errors = append(errors, "weather info is required for weather intent")
+		} else if pr.Weather.Location == "" {
+			errors = append(errors, "weather location is required")
+		}
+	case IntentRecordActivity:
+		if pr.RecordActivity == nil {
+			errors = append(errors, "record activity info is required for record_activity intent")
+		} else if pr.RecordActivity.ActivityType == "" {
+			errors = append(errors, "activity type is required for record_activity intent")
+		}
+	case IntentQueryActivity:
+		if pr.QueryActivity == nil {
+			errors = append(errors, "query activity info is required for query_activity intent")
+		} else if pr.QueryActivity.QueryType == "" {
+			errors = append(errors, "query type is required for query_activity intent")
 		}
 	case IntentChat:
 		if pr.ChatResponse == nil {

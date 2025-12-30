@@ -10,11 +10,13 @@ My name is chenwl. I am a software engineer based in Beijing  China. My English 
 MMemory is a Telegram Bot-based intelligent reminder tool built with Go. The system enables conversational interaction for managing daily habits and task reminders through AI-powered natural language processing.
 
 ### Key Features
-- **AI-Powered Parsing**: OpenAI integration for intelligent message understanding (C1 phase completed)
-- **Smart Conversation**: 30-day conversation history for context-aware interactions
-- **Fallback Strategy**: Four-layer degradation (Primary AI → Backup AI → Regex → Fallback chat)
-- **Scheduler System**: Cron-based reminder execution with persistence
-- **Monitoring**: Comprehensive Prometheus metrics and Grafana dashboards
+- **Multi-AI Provider Support**: OpenAI, Claude with intelligent provider selection (C3 phase completed)
+- **Smart Conversation**: 30-day conversation history with intelligent context management
+- **Intelligent Degradation**: C3 four-layer degradation with cost control and monitoring
+- **Context-Aware Suggestions**: AI-powered reminder optimization based on user behavior patterns
+- **Weather Integration**: Location-aware weather-based reminder triggers
+- **Scheduler System**: Cron-based reminder execution with persistence and recovery
+- **Advanced Monitoring**: Prometheus metrics, Grafana dashboards, and intelligent alerting
 
 ## Development Commands
 
@@ -58,6 +60,7 @@ make docker-logs       # 查看日志
 # 代码质量
 make fmt               # 格式化代码
 make tidy              # 整理依赖
+make lint              # 代码质量检查
 
 # 版本管理
 make version           # 显示版本信息
@@ -138,60 +141,96 @@ The codebase follows a layered architecture pattern with clean separation of con
 - **Server Layer** (`pkg/server/`): HTTP server for health checks and metrics
 
 ### Key Services
-- **AIParserService**: OpenAI-powered natural language understanding with fallback strategy
-- **ConversationService**: 30-day conversation history management for context-aware parsing
+- **IntelligentAIManager**: Multi-provider AI management with intelligent selection and cost control
+- **AIParserService**: Multi-AI natural language understanding with C3 intelligent degradation
+- **ContextManager**: Intelligent conversation context management and user behavior analysis
+- **ConversationService**: 30-day conversation history with enhanced context awareness
+- **SuggestionService**: AI-powered reminder optimization and behavioral suggestions
+- **WeatherService**: Location-aware weather integration and conditional triggers
 - **ReminderService**: Core business logic for creating, managing, and tracking reminders
 - **SchedulerService**: Cron-based job scheduling with persistence and recovery
-- **NotificationService**: Telegram message sending and user interaction handling
-- **MonitoringService**: Prometheus metrics collection and system monitoring
-- **ConfigManager**: Dynamic configuration loading with file watching
+- **NotificationService**: Telegram message sending and intelligent user interaction handling
+- **MonitoringService**: Advanced Prometheus metrics with intelligent alerting
+- **ConfigManager**: Dynamic configuration loading with comprehensive validation
 
 ### Data Flow
-1. User message → Bot handler → AIParserService (with fallback) → ReminderService → Repository → SQLite
-2. Cron scheduler triggers → ReminderService → NotificationService → Telegram Bot API
-3. User responses → Bot handlers → Service layer for status updates
+1. User message → Bot handler → ContextManager → IntelligentAIManager → AIParserService → ReminderService → Repository → SQLite
+2. ContextManager updates user behavior patterns → SuggestionService → IntelligentAIManager for personalized responses
+3. WeatherService integration → Location-based triggers → ReminderService enhancement
+4. Cron scheduler triggers → ReminderService → NotificationService → Telegram Bot API
+5. User responses → Bot handlers → Service layer → C3 monitoring and cost control updates
 
 ## AI Integration Architecture
 
-### OpenAI Integration (C1 Phase - Completed)
-The system integrates OpenAI for intelligent natural language understanding with a robust fallback strategy:
+### Multi-Provider AI Integration (C3 Phase - Completed)
+The system features an advanced multi-provider AI architecture with intelligent degradation and cost control:
 
 **Core Components**:
-- `pkg/ai/config.go`: AI configuration with default Prompt templates
-- `internal/ai/openai_client.go`: OpenAI API client wrapper
-- `internal/service/ai_parser.go`: AI parsing service with fallback chain
-- `internal/service/conversation.go`: Conversation history management
+- `pkg/ai/manager.go`: Unified AI provider management with intelligent selection
+- `pkg/ai/provider_interface.go`: Standardized provider interface for extensibility
+- `pkg/ai/openai_provider.go`: OpenAI provider implementation with cost tracking
+- `pkg/ai/claude_provider.go`: Claude AI provider implementation
+- `pkg/ai/intelligent_manager.go`: Intelligent provider selection and degradation
+- `pkg/ai/c3_integration.go`: C3 intelligent degradation mechanism
+- `pkg/ai/fallback_strategy.go`: Smart fallback strategy with confidence scoring
+- `pkg/ai/cost_controller.go`: AI usage cost optimization and budget management
+- `pkg/ai/advanced_monitoring.go`: Real-time monitoring and alerting
 
-**Fallback Strategy** (Four layers):
-1. **Primary AI**: OpenAI primary model (configurable, e.g., LongCat-Flash-Chat)
-2. **Backup AI**: OpenAI backup model (same as primary to ensure compatibility)
-3. **Regex Parser**: Traditional pattern matching for simple commands
-4. **Fallback Chat**: Generic response when all else fails
+**C3 Intelligent Degradation** (Enhanced Four layers):
+1. **Primary AI**: OpenAI GPT-4o-mini with intelligent cost monitoring
+2. **Secondary AI**: Claude 3.5 Sonnet with provider failover
+3. **Enhanced Regex Parser**: Context-aware pattern matching
+4. **Intelligent Fallback**: Context-preserving chat responses with learning
 
-**Prompt Management**:
-- Default Prompt templates built into `pkg/ai/config.go`
-- Override via `configs/config.yaml` or environment variables
-- Templates include ReminderParse and ChatResponse
+**Provider Selection Strategy**:
+- **Cost-based**: Automatically select most cost-effective provider based on task complexity
+- **Performance-based**: Route to providers with best response times for specific tasks
+- **Availability-based**: Real-time health checks with automatic failover
+- **Budget-aware**: Respect per-user and global AI usage budgets
 
 **Configuration**:
 ```yaml
 ai:
   enabled: true
-  openai:
-    api_key: "${MMEMORY_AI_OPENAI_API_KEY}"
-    base_url: "https://api.openai.com/v1"  # or custom endpoint
-    primary_model: "gpt-4o-mini"
-    backup_model: "gpt-4o-mini"  # should match primary for compatibility
-    temperature: 0.1
-    max_tokens: 1000
-    timeout: "30s"
+  providers:
+    openai:
+      enabled: true
+      api_key: "${MMEMORY_AI_OPENAI_API_KEY}"
+      base_url: "https://api.openai.com/v1"
+      model: "gpt-4o-mini"
+      temperature: 0.1
+      max_tokens: 1000
+      timeout: "30s"
+      max_retries: 3
+      cost_per_token: 0.00001  # Cost tracking for budget management
+    claude:
+      enabled: true
+      api_key: "${MMEMORY_AI_CLAUDE_API_KEY}"
+      model: "claude-3-5-sonnet-20241022"
+      temperature: 0.1
+      max_tokens: 1000
+      timeout: "30s"
+      max_retries: 3
+      cost_per_token: 0.000015
+  c3:
+    enabled: true
+    budget_limit_per_user: 10.0  # Daily budget per user in USD
+    global_budget_limit: 100.0   # Global daily budget in USD
+    cost_monitoring_interval: "5m"
+    degradation_threshold: 0.7   # Confidence threshold for fallback
+  fallback:
+    enabled: true
+    confidence_threshold: 0.6
+    max_fallback_attempts: 3
 ```
 
-**Key Features**:
-- Smart context building from conversation history
-- Automatic fallback when AI fails or returns low confidence
-- Empty prompt configuration defaults to built-in templates
-- Support for third-party OpenAI-compatible APIs
+**Advanced Features**:
+- **Intelligent Cost Control**: Real-time budget monitoring and provider selection
+- **Dynamic Provider Selection**: AI-powered provider choice based on task requirements
+- **Confidence Scoring**: Automatic degradation when confidence drops below threshold
+- **Learning System**: Improves provider selection based on historical performance
+- **Context Preservation**: Maintains conversation context across provider switches
+- **Real-time Monitoring**: Provider health, response times, and cost tracking
 
 ## Database Schema
 
@@ -247,15 +286,30 @@ Critical environment variables:
 - `MMEMORY_MONITORING_ENABLED`: Enable Prometheus metrics
 
 **AI-Specific Variables**:
-- `MMEMORY_AI_ENABLED`: Enable/disable AI functionality (default: false)
-- `MMEMORY_AI_OPENAI_API_KEY`: OpenAI API key (required if AI enabled)
-- `MMEMORY_AI_OPENAI_BASE_URL`: API endpoint (default: OpenAI, supports third-party)
-- `MMEMORY_AI_OPENAI_PRIMARY_MODEL`: Primary model name (e.g., "gpt-4o-mini")
-- `MMEMORY_AI_OPENAI_BACKUP_MODEL`: Backup model name (should match primary)
-- `MMEMORY_AI_OPENAI_TEMPERATURE`: Model temperature (default: 0.1)
-- `MMEMORY_AI_OPENAI_MAX_TOKENS`: Max tokens per request (default: 1000)
-- `MMEMORY_AI_OPENAI_TIMEOUT`: Request timeout (default: 30s)
-- `MMEMORY_AI_OPENAI_MAX_RETRIES`: Max retry attempts (default: 3)
+- `MMEMORY_AI_ENABLED`: Enable/disable AI functionality (default: true)
+- `MMEMORY_AI_OPENAI_API_KEY`: OpenAI API key
+- `MMEMORY_AI_OPENAI_BASE_URL`: OpenAI API endpoint (supports third-party)
+- `MMEMORY_AI_OPENAI_MODEL`: OpenAI model name (default: "gpt-4o-mini")
+- `MMEMORY_AI_CLAUDE_API_KEY`: Claude AI API key
+- `MMEMORY_AI_CLAUDE_MODEL`: Claude model name (default: "claude-3-5-sonnet-20241022")
+
+**C3 Degradation Variables**:
+- `MMEMORY_AI_C3_ENABLED`: Enable C3 intelligent degradation (default: true)
+- `MMEMORY_AI_C3_BUDGET_LIMIT_PER_USER`: Daily AI budget per user in USD (default: 10.0)
+- `MMEMORY_AI_C3_GLOBAL_BUDGET_LIMIT`: Global daily AI budget in USD (default: 100.0)
+- `MMEMORY_AI_C3_DEGRADATION_THRESHOLD`: Confidence threshold for fallback (default: 0.7)
+- `MMEMORY_AI_FALLBACK_CONFIDENCE_THRESHOLD`: Minimum confidence for AI responses (default: 0.6)
+
+**Weather Service Variables**:
+- `MMEMORY_WEATHER_API_KEY`: Weather API key (e.g., QWeather)
+- `MMEMORY_WEATHER_BASE_URL`: Weather API endpoint
+- `MMEMORY_WEATHER_TIMEOUT`: Weather API request timeout (default: 10s)
+
+**General AI Configuration**:
+- `MMEMORY_AI_TEMPERATURE`: Model temperature (default: 0.1)
+- `MMEMORY_AI_MAX_TOKENS`: Max tokens per request (default: 1000)
+- `MMEMORY_AI_TIMEOUT`: AI request timeout (default: 30s)
+- `MMEMORY_AI_MAX_RETRIES`: Max retry attempts (default: 3)
 
 ## Error Handling
 
@@ -324,23 +378,63 @@ The system includes comprehensive monitoring capabilities:
 - `scripts/`: Build and deployment automation scripts
 - `test/`: Integration and end-to-end tests
 
+## Additional Services
+
+### Weather Integration
+The system integrates with weather APIs to provide location-aware reminder triggers:
+- **Core Components**:
+  - `internal/service/weather.go`: Weather service implementation
+  - `internal/models/weather.go`: Weather data models
+  - Support for multiple weather providers (QWeather, OpenWeatherMap)
+- **Features**:
+  - Location-based weather monitoring
+  - Conditional reminders based on weather conditions
+  - Weather forecasts for intelligent reminder scheduling
+
+### Context-Aware Suggestions
+AI-powered suggestion system that learns from user behavior:
+- **Core Components**:
+  - `internal/service/suggestion.go`: Suggestion engine
+  - `internal/service/context_manager.go`: Context management and analysis
+  - Behavioral pattern recognition and optimization recommendations
+- **Features**:
+  - Analyzes user reminder patterns
+  - Suggests optimal reminder timing
+  - Identifies potential reminder conflicts
+  - Provides personalized productivity insights
+
 ## Recent Changes and Project Status
 
-### Phase 3 - AI Integration (In Progress)
+### Phase 3 - C3 Intelligent AI Integration (Completed)
 - ✅ **C1 Completed** (2025-10-10): AI Parser Interface Design
   - OpenAI client integration
   - Fallback chain implementation
   - Conversation history management
   - Default Prompt templates
   - Bug fixes: Empty prompt config and backup model compatibility
-- 📋 **C2 Planned**: Multi-AI Provider Support (OpenAI + Claude)
-- 📋 **C3 Planned**: Intelligent Degradation Mechanism
-- 📋 **C4 Planned**: Dual Parser Architecture Deployment
+- ✅ **C2 Completed** (2025-10-15): Multi-AI Provider Support
+  - Claude AI integration
+  - Provider interface standardization
+  - Dynamic provider selection
+  - Cost tracking implementation
+- ✅ **C3 Completed** (2025-10-20): Intelligent Degradation Mechanism
+  - Advanced cost control and budget management
+  - Real-time monitoring and alerting
+  - Confidence-based degradation
+  - Learning system for provider optimization
+- 📋 **C4 In Progress**: Enhanced Features and Testing
+  - Weather service integration
+  - Context-aware suggestions
+  - Comprehensive testing and validation
+  - Performance optimization
 
 ### Important Notes for Development
-- **AI Configuration**: Always ensure backup model matches primary for third-party APIs
-- **Prompt Templates**: System auto-fills empty prompts with defaults from `pkg/ai/config.go`
-- **Build Process**: Use Makefile (`make build`) for consistent binary output to `bin/`
-- **Version Management**: Build with version info injection via ldflags, use `/version` command in bot
-- **Testing AI**: Set `OPENAI_API_KEY` or equivalent for integration tests
-- **Docker**: Environment variables from `.env` are auto-loaded by docker-compose
+- **Multi-Provider Configuration**: Both OpenAI and Claude APIs should be configured for optimal performance
+- **C3 Budget Management**: Monitor AI usage costs through the built-in cost control system
+- **Context Management**: System maintains intelligent conversation context across provider switches
+- **Build Process**: Use Makefile (`make build`) for consistent binary output to `bin/` with `CGO_ENABLED=1`
+- **Version Management**: Current version is `v0.4.0-dev`, use `/version` command in bot for details
+- **Testing AI**: Set appropriate API keys (`MMEMORY_AI_OPENAI_API_KEY`, `MMEMORY_AI_CLAUDE_API_KEY`) for integration tests
+- **Weather Integration**: Configure `MMEMORY_WEATHER_API_KEY` for location-based features
+- **Monitoring**: C3 system provides real-time cost monitoring and intelligent alerting
+- **Docker**: All environment variables are auto-loaded by docker-compose from `.env` file

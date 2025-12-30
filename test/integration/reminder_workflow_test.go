@@ -18,12 +18,12 @@ import (
 // TestReminderWorkflow 测试完整的提醒工作流程
 func TestReminderWorkflow(t *testing.T) {
 	// 设置测试数据库
-	db, cleanup := setupTestDB(t)
+	db, queryOptimizer, cleanup := setupTestDB(t)
 	defer cleanup()
 
 	// 初始化仓储层
 	userRepo := sqliterepo.NewUserRepository(db)
-	reminderRepo := sqliterepo.NewReminderRepository(db)
+	reminderRepo := sqliterepo.NewReminderRepository(db, queryOptimizer)
 	reminderLogRepo := sqliterepo.NewReminderLogRepository(db)
 
 	// 初始化服务层
@@ -147,12 +147,12 @@ func TestReminderWorkflow(t *testing.T) {
 // TestDelayReminderWorkflow 测试延期提醒的完整工作流程
 func TestDelayReminderWorkflow(t *testing.T) {
 	// 设置测试数据库
-	db, cleanup := setupTestDB(t)
+	db, queryOptimizer, cleanup := setupTestDB(t)
 	defer cleanup()
 
 	// 初始化仓储层
 	userRepo := sqliterepo.NewUserRepository(db)
-	reminderRepo := sqliterepo.NewReminderRepository(db)
+	reminderRepo := sqliterepo.NewReminderRepository(db, queryOptimizer)
 	reminderLogRepo := sqliterepo.NewReminderLogRepository(db)
 
 	// 初始化服务层
@@ -243,7 +243,7 @@ func TestDelayReminderWorkflow(t *testing.T) {
 }
 
 // setupTestDB 设置测试数据库
-func setupTestDB(t *testing.T) (*gorm.DB, func()) {
+func setupTestDB(t *testing.T) (*gorm.DB, *sqliterepo.QueryOptimizer, func()) {
 	// 创建内存数据库用于测试
 	db, err := gorm.Open(sqlite.Open(":memory:"), &gorm.Config{})
 	require.NoError(t, err)
@@ -256,13 +256,17 @@ func setupTestDB(t *testing.T) (*gorm.DB, func()) {
 	)
 	require.NoError(t, err)
 
-	// 返回数据库和清理函数
+	// 创建查询优化器
+	queryOptimizer := sqliterepo.NewQueryOptimizer(10 * time.Millisecond)
+
+	// 返回数据库、查询优化器和清理函数
 	cleanup := func() {
+		queryOptimizer.Stop()
 		sqlDB, err := db.DB()
 		if err == nil {
 			sqlDB.Close()
 		}
 	}
 
-	return db, cleanup
+	return db, queryOptimizer, cleanup
 }

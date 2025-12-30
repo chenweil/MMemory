@@ -28,6 +28,9 @@ type MessageHandler struct {
 	conversationService service.ConversationService
 	contextManager      service.ContextManagerService
 	suggestionService   service.ReminderSuggestionService
+
+	// 活动记录服务
+	dailyActivityService service.DailyActivityService
 }
 
 type conversationContextKey struct{}
@@ -57,15 +60,17 @@ func NewMessageHandler(
 	conversationService service.ConversationService,
 	contextManager service.ContextManagerService,
 	suggestionService service.ReminderSuggestionService,
+	dailyActivityService service.DailyActivityService,
 ) *MessageHandler {
 	return &MessageHandler{
-		reminderService:     reminderService,
-		userService:         userService,
-		reminderLogService:  reminderLogService,
-		aiParserService:     aiParserService,
-		conversationService: conversationService,
-		contextManager:      contextManager,
-		suggestionService:   suggestionService,
+		reminderService:      reminderService,
+		userService:          userService,
+		reminderLogService:   reminderLogService,
+		aiParserService:      aiParserService,
+		conversationService:  conversationService,
+		contextManager:       contextManager,
+		suggestionService:    suggestionService,
+		dailyActivityService: dailyActivityService,
 	}
 }
 
@@ -344,9 +349,24 @@ func (h *MessageHandler) handleTextMessage(ctx context.Context, bot botinterface
 
 // handleWithAI 使用AI解析器处理消息
 func (h *MessageHandler) handleWithAI(ctx context.Context, bot botinterface.BotAPI, message *tgbotapi.Message, user *models.User) error {
-	// 调用AI解析服务
+	// 获取会话历史上下文
+	var conversationHistory string
+	if h.contextManager != nil {
+		contextState, err := h.contextManager.GetContext(ctx, user.ID)
+		if err == nil && contextState != nil {
+			// 格式化会话历史为字符串
+			conversationHistory = h.formatConversationHistory(contextState.Messages)
+			if conversationHistory != "" {
+				logger.Infof("获取到用户 %d 的会话历史，包含 %d 条消息", user.ID, len(contextState.Messages))
+			}
+		} else {
+			logger.Debugf("获取用户 %d 的会话上下文失败或为空: %v", user.ID, err)
+		}
+	}
+
+	// 调用AI解析服务（带上下文）
 	userIDStr := fmt.Sprintf("%d", user.TelegramID)
-	parseResult, err := h.aiParserService.ParseMessage(ctx, userIDStr, message.Text)
+	parseResult, err := h.aiParserService.ParseMessageWithContext(ctx, userIDStr, message.Text, conversationHistory)
 	if err != nil {
 		logger.Errorf("AI解析失败，降级到传统解析器: %v", err)
 		return h.handleWithLegacyParser(ctx, bot, message, user)
@@ -374,6 +394,10 @@ func (h *MessageHandler) handleWithAI(ctx context.Context, bot botinterface.BotA
 		return h.handlePauseIntent(ctx, bot, message, user, parseResult)
 	case ai.IntentResume:
 		return h.handleResumeIntent(ctx, bot, message, user, parseResult)
+	case ai.IntentRecordActivity:
+		return h.handleRecordActivityIntent(ctx, bot, message, user, parseResult)
+	case ai.IntentQueryActivity:
+		return h.handleQueryActivityIntent(ctx, bot, message, user, parseResult)
 	case ai.IntentChat:
 		return h.handleChatIntent(ctx, bot, message, user, parseResult)
 	case ai.IntentSummary:
@@ -505,11 +529,24 @@ func (h *MessageHandler) handleDeleteIntent(ctx context.Context, bot botinterfac
 
 // handleEditIntent 处理编辑意图
 func (h *MessageHandler) handleEditIntent(ctx context.Context, bot botinterface.BotAPI, message *tgbotapi.Message, user *models.User, parseResult *ai.ParseResult) error {
-	if parseResult.Edit == nil {
-		return h.sendMessage(bot, message.Chat.ID, "❓ 你想修改哪个提醒？请提供提醒名称或时间。")
+	// 如果AI没有识别到具体的编辑信息，提供编辑指导
+	if parseResult.Edit == nil || (len(parseResult.Edit.Keywords) == 0 && parseResult.Edit.NewTime == nil && parseResult.Edit.NewPattern == "" && parseResult.Edit.NewTitle == "") {
+		// 获取用户的提醒列表
+		reminders, err := h.reminderService.GetUserReminders(ctx, user.ID)
+		if err != nil {
+			logger.Errorf("获取用户提醒失败: %v", err)
+			return h.sendErrorMessage(bot, message.Chat.ID, "获取提醒列表失败，请稍后再试")
+		}
+
+		if len(reminders) == 0 {
+			return h.sendMessage(bot, message.Chat.ID, "❓ 你还没有设置任何提醒。\n\n💡 可以先说：\"每天19点提醒我复盘工作\"")
+		}
+
+		// 提供编辑指导
+		return h.sendEditGuidance(bot, message.Chat.ID, reminders)
 	}
 
-	keywords := filterKeywords(parseResult.Edit.Keywords)
+	keywords := parseResult.Edit.Keywords
 	if len(keywords) == 0 {
 		return h.sendMessage(bot, message.Chat.ID, "❓ 需要提醒关键词才能帮你修改哦，例如：\"修改健身提醒到晚上7点\"。")
 	}
@@ -557,10 +594,10 @@ func (h *MessageHandler) handleEditIntent(ctx context.Context, bot botinterface.
 		params.NewTitle = &parseResult.Edit.NewTitle
 	}
 
-	// TODO: 未来可以支持描述编辑 - 将 NewText 映射到 NewDescription
-	// if parseResult.Edit.NewText != "" {
-	//     params.NewDescription = &parseResult.Edit.NewText
-	// }
+	// 处理描述编辑
+	if parseResult.Edit.NewText != "" {
+		params.NewDescription = &parseResult.Edit.NewText
+	}
 
 	// 3. 执行编辑
 	if err := h.reminderService.EditReminder(ctx, params); err != nil {
@@ -687,6 +724,84 @@ func (h *MessageHandler) handleResumeIntent(ctx context.Context, bot botinterfac
 
 	response := fmt.Sprintf("▶️ 已恢复提醒\n\n📝 %s\n⏰ %s", target.Title, h.formatSchedule(target))
 	return h.sendMessage(bot, message.Chat.ID, response)
+}
+
+// handleRecordActivityIntent 处理记录活动意图
+func (h *MessageHandler) handleRecordActivityIntent(ctx context.Context, bot botinterface.BotAPI, message *tgbotapi.Message, user *models.User, parseResult *ai.ParseResult) error {
+	if h.dailyActivityService == nil {
+		return h.sendMessage(bot, message.Chat.ID, "活动记录功能暂未启用")
+	}
+
+	if parseResult.RecordActivity == nil {
+		return h.sendMessage(bot, message.Chat.ID, "无法识别活动信息")
+	}
+
+	activityType := models.ActivityType(parseResult.RecordActivity.ActivityType)
+	if activityType == "" {
+		return h.sendMessage(bot, message.Chat.ID, "无法识别活动类型")
+	}
+
+	_, err := h.dailyActivityService.RecordActivity(
+		ctx,
+		user.ID,
+		activityType,
+		parseResult.RecordActivity.Details,
+		models.SourceConversation,
+	)
+
+	if err != nil {
+		logger.Errorf("记录活动失败: %v", err)
+		return h.sendErrorMessage(bot, message.Chat.ID, "记录活动失败，请稍后重试")
+	}
+
+	confirmMsg := fmt.Sprintf("✅ 已记录：%s", getActivityTypeDisplayName(activityType))
+	return h.sendMessage(bot, message.Chat.ID, confirmMsg)
+}
+
+// handleQueryActivityIntent 处理查询活动意图
+func (h *MessageHandler) handleQueryActivityIntent(ctx context.Context, bot botinterface.BotAPI, message *tgbotapi.Message, user *models.User, parseResult *ai.ParseResult) error {
+	if h.dailyActivityService == nil {
+		return h.sendMessage(bot, message.Chat.ID, "活动查询功能暂未启用")
+	}
+
+	if parseResult.QueryActivity == nil {
+		return h.sendMessage(bot, message.Chat.ID, "无法识别查询条件")
+	}
+
+	response, err := h.dailyActivityService.QueryActivities(
+		ctx,
+		user.ID,
+		parseResult.QueryActivity.QueryType,
+		parseResult.QueryActivity.ActivityType,
+		parseResult.QueryActivity.TimeRange,
+	)
+
+	if err != nil {
+		logger.Errorf("查询活动失败: %v", err)
+		return h.sendErrorMessage(bot, message.Chat.ID, "查询失败，请稍后重试")
+	}
+
+	return h.sendMessage(bot, message.Chat.ID, response)
+}
+
+// getActivityTypeDisplayName 获取活动类型的显示名称
+func getActivityTypeDisplayName(activityType models.ActivityType) string {
+	switch activityType {
+	case models.ActivityTypeDrinkWater:
+		return "喝水"
+	case models.ActivityTypeTakeMedicine:
+		return "吃药"
+	case models.ActivityTypeReadBook:
+		return "看书"
+	case models.ActivityTypeExercise:
+		return "运动"
+	case models.ActivityTypeSleep:
+		return "睡眠"
+	case models.ActivityTypeEat:
+		return "吃饭"
+	default:
+		return string(activityType)
+	}
 }
 
 // handleChatIntent 处理对话意图
@@ -1076,4 +1191,85 @@ func (h *MessageHandler) sendMessage(bot botinterface.BotAPI, chatID int64, text
 func (h *MessageHandler) sendErrorMessage(bot botinterface.BotAPI, chatID int64, text string) error {
 	errorText := "⚠️ " + text
 	return h.sendMessage(bot, chatID, errorText)
+}
+
+// sendEditGuidance 发送编辑指导
+func (h *MessageHandler) sendEditGuidance(bot botinterface.BotAPI, chatID int64, reminders []*models.Reminder) error {
+	if len(reminders) == 0 {
+		return h.sendMessage(bot, chatID, "❓ 你还没有设置任何提醒。\n\n💡 可以先说：\"每天19点提醒我复盘工作\"")
+	}
+
+	// 显示最近的几个提醒作为示例
+	recentReminders := reminders
+	if len(recentReminders) > 5 {
+		recentReminders = recentReminders[len(recentReminders)-5:]
+	}
+
+	text := "🛠️ <b>编辑提醒指南</b>\n\n"
+	text += "你可以通过以下方式编辑提醒：\n\n"
+	text += "1️⃣ <b>自然语言编辑</b>：\n"
+	text += "• \"把健身提醒改成晚上8点\"\n"
+	text += "• \"修改读书提醒为每周一三五\"\n"
+	text += "• \"把标题改成学习英语\"\n\n"
+	text += "2️⃣ <b>按钮编辑</b>：\n"
+	text += "• 点击提醒消息中的\"📝 编辑\"按钮\n"
+	text += "• 选择要修改的字段\n"
+	text += "• 选择或输入新的值\n\n"
+	text += "3️⃣ <b>查看提醒列表</b>：\n"
+	text += "• 发送 /list 查看所有提醒\n"
+	text += "• 点击提醒旁边的编辑按钮\n\n"
+
+	if len(recentReminders) > 0 {
+		text += "💡 <b>你的最近提醒：</b>\n"
+		for i, reminder := range recentReminders {
+			text += fmt.Sprintf("%d. %s (⏰ %s)\n", i+1, reminder.Title, reminder.TargetTime[:5])
+		}
+		text += "\n"
+	}
+
+	text += "试试说：\"修改健身提醒到晚上7点\""
+
+	return h.sendMessage(bot, chatID, text)
+}
+
+// formatConversationHistory 格式化会话历史为字符串
+func (h *MessageHandler) formatConversationHistory(messages []models.ConversationMessage) string {
+	if len(messages) == 0 {
+		return ""
+	}
+
+	// 最多保留最近20条消息
+	recentMessages := messages
+	if len(recentMessages) > 20 {
+		recentMessages = recentMessages[len(recentMessages)-20:]
+	}
+
+	var history strings.Builder
+	history.WriteString("\n【对话历史（请记住关键信息）】\n")
+	history.WriteString("以下是最近的对话记录，请记住用户提到的书名、章节、人物等关键实体：\n\n")
+
+	for i, msg := range recentMessages {
+		if msg.Content != "" {
+			msgText := strings.TrimSpace(msg.Content)
+			// 保留完整内容，不超过200字
+			if len(msgText) > 200 {
+				msgText = msgText[:200] + "..."
+			}
+
+			// 显示序号和角色
+			role := "用户"
+			if msg.Role == "assistant" || msg.Role == "ai" {
+				role = "AI"
+			}
+
+			history.WriteString(fmt.Sprintf("%d. %s: %s\n", i+1, role, msgText))
+		}
+	}
+
+	history.WriteString("\n【重要】：\n")
+	history.WriteString("- 记住用户提到的书名、章节、人物等关键信息\n")
+	history.WriteString("- 当用户说'这个'、'那个'时，请根据上下文判断具体指代\n")
+	history.WriteString("- 保持对话的连贯性，围绕同一个话题展开\n")
+
+	return history.String()
 }

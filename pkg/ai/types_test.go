@@ -307,6 +307,7 @@ func TestParseIntent_IsValid(t *testing.T) {
 		IntentEdit,
 		IntentPause,
 		IntentResume,
+		IntentWeather,
 		IntentUnknown,
 	}
 
@@ -438,4 +439,66 @@ func TestChatResponse(t *testing.T) {
 	assert.Equal(t, "openai-gpt-4", response.ParsedBy)
 	assert.Equal(t, 100*time.Millisecond, response.ProcessTime)
 	assert.False(t, response.Timestamp.IsZero())
+}
+
+// TestWeatherInfo 测试WeatherInfo结构
+func TestWeatherInfo(t *testing.T) {
+	weatherInfo := WeatherInfo{
+		Location: "北京",
+		Date:     "今天",
+	}
+
+	assert.Equal(t, "北京", weatherInfo.Location)
+	assert.Equal(t, "今天", weatherInfo.Date)
+}
+
+// TestParseIntent_Weather 测试天气意图
+func TestParseIntent_Weather(t *testing.T) {
+	weatherIntent := IntentWeather
+	assert.True(t, weatherIntent.IsValid(), "IntentWeather应该是有效的")
+	assert.Equal(t, "weather", weatherIntent.String(), "IntentWeather的字符串表示应该是'weather'")
+}
+
+// TestParseResult_WeatherValidation 测试天气解析结果验证
+func TestParseResult_WeatherValidation(t *testing.T) {
+	// 测试有效的天气解析结果
+	validResult := &ParseResult{
+		Intent:     IntentWeather,
+		Confidence: 0.95,
+		Weather: &WeatherInfo{
+			Location: "上海",
+			Date:     "明天",
+		},
+		Timestamp: time.Now(),
+	}
+
+	validation := validResult.Validate()
+	assert.True(t, validation.IsValid, "有效的天气解析结果应该通过验证")
+	assert.Empty(t, validation.Errors, "有效的天气解析结果不应该有错误")
+
+	// 测试缺少Weather信息的解析结果
+	invalidResult1 := &ParseResult{
+		Intent:     IntentWeather,
+		Confidence: 0.95,
+		Timestamp:  time.Now(),
+	}
+
+	validation1 := invalidResult1.Validate()
+	assert.False(t, validation1.IsValid, "缺少Weather信息的解析结果应该验证失败")
+	assert.Contains(t, validation1.Errors, "weather info is required for weather intent", "应该提示缺少天气信息")
+
+	// 测试缺少Location信息的解析结果
+	invalidResult2 := &ParseResult{
+		Intent:     IntentWeather,
+		Confidence: 0.95,
+		Weather: &WeatherInfo{
+			Location: "", // 空位置
+			Date:     "今天",
+		},
+		Timestamp: time.Now(),
+	}
+
+	validation2 := invalidResult2.Validate()
+	assert.False(t, validation2.IsValid, "缺少Location信息的解析结果应该验证失败")
+	assert.Contains(t, validation2.Errors, "weather location is required", "应该提示缺少位置信息")
 }

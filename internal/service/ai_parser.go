@@ -11,8 +11,11 @@ import (
 
 // AIParserService AI解析服务接口
 type AIParserService interface {
-	// ParseMessage 智能解析 - 支持多种意图
+	// ParseMessage 智能解析 - 支持多种意图（兼容旧接口）
 	ParseMessage(ctx context.Context, userID string, message string) (*ai.ParseResult, error)
+
+	// ParseMessageWithContext 带上下文的智能解析（新接口）
+	ParseMessageWithContext(ctx context.Context, userID string, message string, conversationHistory string) (*ai.ParseResult, error)
 
 	// Chat 对话功能
 	Chat(ctx context.Context, userID string, message string) (*ai.ChatResponse, error)
@@ -78,12 +81,18 @@ func NewAIParserService(config *ai.AIConfig) (AIParserService, error) {
 	}, nil
 }
 
-// ParseMessage 实现AIParserService接口
+// ParseMessage 实现AIParserService接口（兼容旧接口）
 func (s *aiParserService) ParseMessage(ctx context.Context, userID string, message string) (*ai.ParseResult, error) {
-	logger.Infof("Parsing message for user %s: %s", userID, message)
+	// 调用带上下文的解析，传入空的历史
+	return s.ParseMessageWithContext(ctx, userID, message, "")
+}
+
+// ParseMessageWithContext 实现AIParserService接口（新接口）
+func (s *aiParserService) ParseMessageWithContext(ctx context.Context, userID string, message string, conversationHistory string) (*ai.ParseResult, error) {
+	logger.Infof("Parsing message for user %s: %s, with context: %v", userID, message, conversationHistory != "")
 
 	// 使用降级链解析
-	result, err := s.fallbackChain.Parse(ctx, userID, message)
+	result, err := s.fallbackChain.ParseWithContext(ctx, userID, message, conversationHistory)
 	if err != nil {
 		logger.Errorf("All parsers failed for message: %s, error: %v", message, err)
 		return nil, err

@@ -46,8 +46,14 @@ func NewOpenAIClient(config *ai.AIConfig) *OpenAIClient {
 	}
 }
 
-// ParseMessage 解析消息
+// ParseMessage 解析消息（兼容旧接口）
 func (c *OpenAIClient) ParseMessage(ctx context.Context, userID, message string) (*ai.ParseResult, error) {
+	// 调用带上下文的解析，传入空的历史
+	return c.ParseWithContext(ctx, userID, message, "")
+}
+
+// ParseWithContext 带上下文的解析消息
+func (c *OpenAIClient) ParseWithContext(ctx context.Context, userID, message string, conversationHistory string) (*ai.ParseResult, error) {
 	start := time.Now()
 
 	// 限流检查
@@ -55,8 +61,8 @@ func (c *OpenAIClient) ParseMessage(ctx context.Context, userID, message string)
 		return nil, ai.NewAIError(ai.ErrorTypeTimeout, "rate limit exceeded", err)
 	}
 
-	// 构建prompt
-	prompt := c.buildReminderPrompt(message)
+	// 构建带上下文的prompt
+	prompt := c.buildReminderPromptWithContext(message, conversationHistory)
 
 	// 调用OpenAI API
 	result, err := c.callOpenAIWithRetry(ctx, prompt, c.config.OpenAI.PrimaryModel)
@@ -80,7 +86,7 @@ func (c *OpenAIClient) ParseMessage(ctx context.Context, userID, message string)
 	parseResult.ProcessTime = time.Since(start)
 	parseResult.Timestamp = time.Now()
 
-	logger.Infof("AI parsing completed in %v, intent: %s, confidence: %.2f", 
+	logger.Infof("AI parsing completed in %v, intent: %s, confidence: %.2f",
 		parseResult.ProcessTime, parseResult.Intent, parseResult.Confidence)
 
 	return parseResult, nil
@@ -206,11 +212,61 @@ func (c *OpenAIClient) buildReminderPrompt(message string) string {
 	prompt := c.config.Prompts.ReminderParse
 	prompt = strings.ReplaceAll(prompt, "{{.Message}}", message)
 	prompt = strings.ReplaceAll(prompt, "{{.CurrentTime}}", time.Now().Format("2006-01-02 15:04:05"))
-	
+
 	// TODO: 后续添加对话历史支持
 	prompt = strings.ReplaceAll(prompt, "{{.ConversationHistory}}", "")
-	
+
 	return prompt
+}
+
+// buildReminderPromptWithContext 构建带上下文的提醒解析prompt
+func (c *OpenAIClient) buildReminderPromptWithContext(message string, conversationHistory string) string {
+	// 替换模板变量
+	prompt := c.config.Prompts.ReminderParse
+	prompt = strings.ReplaceAll(prompt, "{{.Message}}", message)
+	prompt = strings.ReplaceAll(prompt, "{{.CurrentTime}}", time.Now().Format("2006-01-02 15:04:05"))
+
+	// 添加对话历史支持
+	if conversationHistory != "" {
+		// 格式化对话历史
+		formattedHistory := c.formatConversationHistory(conversationHistory)
+		prompt = strings.ReplaceAll(prompt, "{{.ConversationHistory}}", formattedHistory)
+	} else {
+		prompt = strings.ReplaceAll(prompt, "{{.ConversationHistory}}", "")
+	}
+
+	return prompt
+}
+
+// formatConversationHistory 格式化对话历史
+func (c *OpenAIClient) formatConversationHistory(history string) string {
+	if history == "" {
+		return ""
+	}
+
+	// 限制历史长度，避免超过token限制
+	lines := strings.Split(history, "\n")
+	if len(lines) > 20 { // 最多保留20行对话
+		lines = lines[len(lines)-20:]
+	}
+
+	// 构建格式化的历史记录
+	var formatted strings.Builder
+	formatted.WriteString("\n\n【最近对话历史】\n")
+	formatted.WriteString("以下是用户最近的对话记录，有助于理解上下文：\n\n")
+
+	for _, line := range lines {
+		line = strings.TrimSpace(line)
+		if line != "" {
+			formatted.WriteString("• ")
+			formatted.WriteString(line)
+			formatted.WriteString("\n")
+		}
+	}
+
+	formatted.WriteString("\n请结合上述对话历史，更好地理解用户的当前意图。\n")
+
+	return formatted.String()
 }
 
 // buildChatPrompt 构建对话prompt

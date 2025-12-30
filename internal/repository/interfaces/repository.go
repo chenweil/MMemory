@@ -37,6 +37,11 @@ type ReminderLogRepository interface {
 	Update(ctx context.Context, log *models.ReminderLog) error
 	Delete(ctx context.Context, id uint) error
 	GetUserLogs(ctx context.Context, userID uint, since time.Time) ([]*models.ReminderLog, error)
+	CreateDelayReminder(ctx context.Context, originalLogID uint, delayTime time.Time, delayHours int) error
+	MarkAsCompleted(ctx context.Context, logID uint, note string) error
+	MarkAsSkipped(ctx context.Context, logID uint, note string) error
+	UpdateFollowUpCount(ctx context.Context, logID uint) error
+	GetOverdueReminders(ctx context.Context) ([]*models.ReminderLog, error)
 }
 
 // ConversationRepository 对话仓储接口
@@ -54,4 +59,17 @@ type ConversationContextRepository interface {
 	CreateOrUpdate(ctx context.Context, ctxModel *models.ConversationContext) error
 	DeleteByUserID(ctx context.Context, userID uint) error
 	CleanupExpired(ctx context.Context, now time.Time) error
+}
+
+// DailyActivityRepository 日常活动仓储接口
+type DailyActivityRepository interface {
+	Create(ctx context.Context, activity *models.DailyActivity) error
+	GetByID(ctx context.Context, id uint) (*models.DailyActivity, error)
+	GetByUserID(ctx context.Context, userID uint, limit, offset int) ([]*models.DailyActivity, error)
+	GetByType(ctx context.Context, userID uint, activityType models.ActivityType, limit, offset int) ([]*models.DailyActivity, error)
+	GetByDateRange(ctx context.Context, userID uint, startTime, endTime time.Time) ([]*models.DailyActivity, error)
+	GetRecentActivities(ctx context.Context, userID uint, limit int) ([]*models.DailyActivity, error)
+	Update(ctx context.Context, activity *models.DailyActivity) error
+	Delete(ctx context.Context, id uint) error
+	GetStatistics(ctx context.Context, userID uint, startTime, endTime time.Time) (map[string]int64, error)
 }

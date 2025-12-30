@@ -12,6 +12,9 @@ type Parser interface {
 	// Parse 解析用户消息
 	Parse(ctx context.Context, userID string, message string) (*ai.ParseResult, error)
 
+	// ParseWithContext 带上下文的解析（新接口）
+	ParseWithContext(ctx context.Context, userID string, message string, conversationHistory string) (*ai.ParseResult, error)
+
 	// GetName 获取解析器名称
 	GetName() string
 

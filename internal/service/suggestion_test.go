@@ -22,7 +22,10 @@ func setupSuggestionService(t *testing.T) (ReminderSuggestionService, *gorm.DB, 
 	require.NoError(t, err)
 	require.NoError(t, db.AutoMigrate(&models.Reminder{}, &models.ReminderLog{}))
 
-	reminderRepo := repoSqlite.NewReminderRepository(db)
+	queryOptimizer := repoSqlite.NewQueryOptimizer(10 * time.Millisecond)
+	defer queryOptimizer.Stop()
+
+	reminderRepo := repoSqlite.NewReminderRepository(db, queryOptimizer)
 	reminderLogRepo := repoSqlite.NewReminderLogRepository(db)
 
 	service := NewReminderSuggestionService(
@@ -51,7 +54,9 @@ func setupSuggestionService(t *testing.T) (ReminderSuggestionService, *gorm.DB, 
 func TestReminderSuggestionService_WithContextTask(t *testing.T) {
 	service, db, _ := setupSuggestionService(t)
 
-	reminderRepo := repoSqlite.NewReminderRepository(db)
+	queryOptimizer := repoSqlite.NewQueryOptimizer(10 * time.Millisecond)
+	defer queryOptimizer.Stop()
+	reminderRepo := repoSqlite.NewReminderRepository(db, queryOptimizer)
 	reminder := &models.Reminder{
 		UserID:          1,
 		Title:           "晨跑",
@@ -95,7 +100,9 @@ func TestReminderSuggestionService_LowCompletionReminder(t *testing.T) {
 	service, db, _ := setupSuggestionService(t)
 	ctx := context.Background()
 
-	reminderRepo := repoSqlite.NewReminderRepository(db)
+	queryOptimizer := repoSqlite.NewQueryOptimizer(10 * time.Millisecond)
+	defer queryOptimizer.Stop()
+	reminderRepo := repoSqlite.NewReminderRepository(db, queryOptimizer)
 	reminder := &models.Reminder{
 		UserID:          2,
 		Title:           "周报整理",

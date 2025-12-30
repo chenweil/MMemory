@@ -39,14 +39,51 @@ func (h *CallbackHandler) HandleCallback(ctx context.Context, bot botinterface.B
 		return h.sendCallbackResponse(bot, callback.ID, "❌ 无效的操作")
 	}
 
-	action := parts[1]
-	resourceIDStr := parts[2]
+	// 检查callback格式
+	// 格式1: reminder_edit_{ID} → ["reminder", "edit", "11"]
+	// 格式2: reminder_edit_field_{ID}_{field} → ["reminder", "edit", "field", "11", "title"]
+	// 格式3: reminder_edit_time_{ID}_{time} → ["reminder", "edit", "time", "11", "12:00"]
+	// 格式4: reminder_edit_pattern_{ID}_{pattern} → ["reminder", "edit", "pattern", "11", "daily"]
+
+	var resourceIDStr string
+	var field string
+	var newTime string
+	var newPattern string
+
+	if parts[1] == "edit" && len(parts) >= 4 {
+		// 可能是复合操作
+		if parts[2] == "field" && len(parts) >= 5 {
+			// 格式: reminder_edit_field_11_title
+			resourceIDStr = parts[3]
+			field = parts[4]
+			logger.Infof("识别为edit_field: ID=%s, field=%s", resourceIDStr, field)
+		} else if parts[2] == "time" && len(parts) >= 4 {
+			// 格式: reminder_edit_time_11_12:00
+			resourceIDStr = parts[3]
+			newTime = strings.Join(parts[3:], "_")
+			logger.Infof("识别为edit_time: ID=%s, time=%s", resourceIDStr, newTime)
+		} else if parts[2] == "pattern" && len(parts) >= 4 {
+			// 格式: reminder_edit_pattern_11_daily
+			resourceIDStr = parts[3]
+			newPattern = strings.Join(parts[3:], "_")
+			logger.Infof("识别为edit_pattern: ID=%s, pattern=%s", resourceIDStr, newPattern)
+		} else {
+			// 简单格式: reminder_edit_11
+			resourceIDStr = parts[2]
+			logger.Infof("识别为简单edit: ID=%s", resourceIDStr)
+		}
+	} else {
+		// 其他操作
+		resourceIDStr = parts[2]
+		logger.Infof("识别为操作: %s, ID=%s", parts[1], resourceIDStr)
+	}
+
 	resourceID, err := strconv.ParseUint(resourceIDStr, 10, 64)
 	if err != nil {
 		return h.sendCallbackResponse(bot, callback.ID, "❌ 无效的提醒ID")
 	}
 
-	switch action {
+	switch parts[1] {
 	case "complete":
 		return h.handleComplete(ctx, bot, callback, uint(resourceID))
 	case "delay":
@@ -68,6 +105,21 @@ func (h *CallbackHandler) HandleCallback(ctx context.Context, bot botinterface.B
 		return h.handleReminderResume(ctx, bot, callback, uint(resourceID))
 	case "edit":
 		return h.handleReminderEdit(ctx, bot, callback, uint(resourceID))
+	case "edit_field":
+		if field == "" {
+			return h.sendCallbackResponse(bot, callback.ID, "❌ 缺少字段信息")
+		}
+		return h.handleEditField(ctx, bot, callback, uint(resourceID), field)
+	case "edit_time":
+		if newTime == "" {
+			return h.sendCallbackResponse(bot, callback.ID, "❌ 缺少时间信息")
+		}
+		return h.handleEditTime(ctx, bot, callback, uint(resourceID), newTime)
+	case "edit_pattern":
+		if newPattern == "" {
+			return h.sendCallbackResponse(bot, callback.ID, "❌ 缺少模式信息")
+		}
+		return h.handleEditPattern(ctx, bot, callback, uint(resourceID), newPattern)
 	default:
 		return h.sendCallbackResponse(bot, callback.ID, "❌ 未知操作")
 	}

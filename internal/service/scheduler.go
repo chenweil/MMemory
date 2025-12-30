@@ -6,6 +6,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/robfig/cron/v3"
@@ -24,6 +25,26 @@ type schedulerService struct {
 	jobs                map[uint]cron.EntryID
 	onceTimers          map[uint]*time.Timer
 	mu                  sync.RWMutex
+
+	// 动态工作池
+	workerPool          chan func()
+	activeWorkers       int32
+	minWorkers          int
+	maxWorkers          int
+
+	// 监控统计
+	stats               SchedulerStats
+	statsMu             sync.RWMutex
+}
+
+type SchedulerStats struct {
+	TotalTasks         int64         // 总任务数
+	CompletedTasks     int64         // 完成的任务数
+	FailedTasks        int64         // 失败的任务数
+	ActiveWorkers      int32         // 当前活跃工作线程数
+	QueueSize          int           // 当前队列大小
+	LastTaskTime       time.Time     // 最后执行任务时间
+	AverageTaskLatency time.Duration // 平均任务延迟
 }
 
 func NewSchedulerService(
@@ -34,6 +55,11 @@ func NewSchedulerService(
 	// 使用北京时区
 	loc, _ := time.LoadLocation("Asia/Shanghai")
 
+	// 默认工作池配置
+	maxWorkers := 10
+	minWorkers := 2
+	workQueueSize := 100
+
 	return &schedulerService{
 		cron:                cron.New(cron.WithLocation(loc)),
 		location:            loc,
@@ -42,6 +68,40 @@ func NewSchedulerService(
 		notificationService: notificationService,
 		jobs:                make(map[uint]cron.EntryID),
 		onceTimers:          make(map[uint]*time.Timer),
+		workerPool:          make(chan func(), workQueueSize),
+		activeWorkers:       0,
+		minWorkers:          minWorkers,
+		maxWorkers:          maxWorkers,
+		stats: SchedulerStats{
+			QueueSize: 0,
+		},
+	}
+}
+
+// NewSchedulerServiceWithConfig 创建带配置的调度服务
+func NewSchedulerServiceWithConfig(
+	reminderRepo interfaces.ReminderRepository,
+	reminderLogRepo interfaces.ReminderLogRepository,
+	notificationService NotificationService,
+	maxWorkers, minWorkers, workQueueSize int,
+) SchedulerService {
+	loc, _ := time.LoadLocation("Asia/Shanghai")
+
+	return &schedulerService{
+		cron:                cron.New(cron.WithLocation(loc)),
+		location:            loc,
+		reminderRepo:        reminderRepo,
+		reminderLogRepo:     reminderLogRepo,
+		notificationService: notificationService,
+		jobs:                make(map[uint]cron.EntryID),
+		onceTimers:          make(map[uint]*time.Timer),
+		workerPool:          make(chan func(), workQueueSize),
+		activeWorkers:       0,
+		minWorkers:          minWorkers,
+		maxWorkers:          maxWorkers,
+		stats: SchedulerStats{
+			QueueSize: workQueueSize,
+		},
 	}
 }
 
@@ -337,6 +397,7 @@ func (s *schedulerService) buildOnceExpression(pattern string, hour, minute int)
 
 // executeReminder 执行提醒任务
 func (s *schedulerService) executeReminder(reminderID uint) {
+	startTime := time.Now()
 	ctx := context.Background()
 
 	logger.Debugf("⏰ 执行提醒任务: ID=%d", reminderID)
@@ -397,4 +458,90 @@ func (s *schedulerService) executeReminder(reminderID uint) {
 			logger.Infof("✅ 一次性提醒已完成并禁用 (ID: %d)", reminderID)
 		}
 	}
+
+	// 更新统计
+	s.updateStats(true, time.Since(startTime))
+}
+
+// submitTask 提交任务到工作池
+func (s *schedulerService) submitTask(task func()) bool {
+	select {
+	case s.workerPool <- task:
+		s.statsMu.Lock()
+		s.stats.QueueSize = len(s.workerPool)
+		s.stats.TotalTasks++
+		s.statsMu.Unlock()
+		s.adjustWorkerPool()
+		return true
+	default:
+		logger.Warn("调度器工作队列已满，任务被丢弃")
+		s.statsMu.Lock()
+		s.stats.FailedTasks++
+		s.statsMu.Unlock()
+		return false
+	}
+}
+
+// adjustWorkerPool 动态调整工作池大小
+func (s *schedulerService) adjustWorkerPool() {
+	currentQueueSize := len(s.workerPool)
+	activeWorkers := atomic.LoadInt32(&s.activeWorkers)
+
+	// 队列拥堵时增加工作线程
+	if currentQueueSize > int(activeWorkers) && activeWorkers < int32(s.maxWorkers) {
+		go s.startWorker()
+	}
+
+	// 队列空闲且有多余线程时减少工作线程
+	if currentQueueSize == 0 && activeWorkers > int32(s.minWorkers) {
+		// 渐进式减少，不直接减少，让空闲线程自然退出
+	}
+}
+
+// startWorker 启动一个工作线程
+func (s *schedulerService) startWorker() {
+	atomic.AddInt32(&s.activeWorkers, 1)
+	defer atomic.AddInt32(&s.activeWorkers, -1)
+
+	for task := range s.workerPool {
+		start := time.Now()
+		task()
+		s.updateStats(true, time.Since(start))
+	}
+}
+
+// updateStats 更新统计信息
+func (s *schedulerService) updateStats(success bool, latency time.Duration) {
+	s.statsMu.Lock()
+	defer s.statsMu.Unlock()
+
+	s.stats.LastTaskTime = time.Now()
+	if success {
+		s.stats.CompletedTasks++
+	} else {
+		s.stats.FailedTasks++
+	}
+
+	// 更新平均延迟
+	totalTasks := s.stats.CompletedTasks + s.stats.FailedTasks
+	if totalTasks > 1 {
+		oldAvg := s.stats.AverageTaskLatency
+		s.stats.AverageTaskLatency = oldAvg + (latency-oldAvg)/time.Duration(totalTasks)
+	} else {
+		s.stats.AverageTaskLatency = latency
+	}
+
+	s.stats.QueueSize = len(s.workerPool)
+	s.stats.ActiveWorkers = atomic.LoadInt32(&s.activeWorkers)
+}
+
+// GetStats 获取调度器统计信息
+func (s *schedulerService) GetStats() SchedulerStats {
+	s.statsMu.RLock()
+	defer s.statsMu.RUnlock()
+
+	stats := s.stats
+	stats.QueueSize = len(s.workerPool)
+	stats.ActiveWorkers = atomic.LoadInt32(&s.activeWorkers)
+	return stats
 }

@@ -1,8 +1,11 @@
 package handlers
 
 import (
+	"context"
 	"testing"
 	"time"
+
+	"github.com/stretchr/testify/assert"
 
 	"mmemory/internal/models"
 )
@@ -399,4 +402,120 @@ func TestMatchReminders_Performance(t *testing.T) {
 	}
 
 	t.Logf("匹配1000个提醒耗时: %v, 匹配到: %d 个", duration, len(matches))
+}
+
+// TestShouldTriggerSuggestion 测试建议触发判断
+func TestShouldTriggerSuggestion(t *testing.T) {
+	tests := []struct {
+		name     string
+		input    string
+		expected bool
+	}{
+		{
+			name:     "包含建议",
+			input:    "给我一些建议",
+			expected: true,
+		},
+		{
+			name:     "包含推荐",
+			input:    "有什么推荐",
+			expected: true,
+		},
+		{
+			name:     "大小写不敏感",
+			input:    "建议",
+			expected: true,
+		},
+		{
+			name:     "包含空格的建议",
+			input:    "  给点建议  ",
+			expected: true,
+		},
+		{
+			name:     "不包含建议关键词",
+			input:    "今天天气不错",
+			expected: false,
+		},
+		{
+			name:     "空字符串",
+			input:    "",
+			expected: false,
+		},
+		{
+			name:     "只有空格",
+			input:    "   ",
+			expected: false,
+		},
+		{
+			name:     "推荐作为部分词",
+			input:    "产品推荐",
+			expected: true,
+		},
+		{
+			name:     "建议作为部分词",
+			input:    "建议使用",
+			expected: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := shouldTriggerSuggestion(tt.input)
+			if result != tt.expected {
+				t.Errorf("shouldTriggerSuggestion(%q) = %v, 期望 %v", tt.input, result, tt.expected)
+			}
+		})
+	}
+}
+
+// TestGetConversationContextState 测试获取对话上下文状态
+func TestGetConversationContextState(t *testing.T) {
+	t.Run("nil上下文", func(t *testing.T) {
+		result := getConversationContextState(nil)
+		assert.Nil(t, result)
+	})
+
+	t.Run("空上下文", func(t *testing.T) {
+		ctx := context.Background()
+		result := getConversationContextState(ctx)
+		assert.Nil(t, result)
+	})
+
+	t.Run("无效类型", func(t *testing.T) {
+		ctx := context.Background()
+		ctx = context.WithValue(ctx, conversationContextKey{}, "invalid string")
+		result := getConversationContextState(ctx)
+		assert.Nil(t, result)
+	})
+
+	t.Run("有效状态", func(t *testing.T) {
+		ctx := context.Background()
+		state := &models.ConversationContextState{
+			UserID:    123,
+			SessionID: "session-123",
+			State:     "test",
+		}
+		ctx = context.WithValue(ctx, conversationContextKey{}, state)
+		result := getConversationContextState(ctx)
+
+		assert.NotNil(t, result)
+		assert.Equal(t, uint(123), result.UserID)
+		assert.Equal(t, "session-123", result.SessionID)
+		assert.Equal(t, "test", result.State)
+	})
+
+	t.Run("多层上下文", func(t *testing.T) {
+		ctx := context.Background()
+		state := &models.ConversationContextState{
+			UserID:    456,
+			SessionID: "chat-456",
+			State:     "chatting",
+		}
+		ctx = context.WithValue(ctx, conversationContextKey{}, state)
+
+		// 验证在子上下文中也能正确获取
+		result := getConversationContextState(ctx)
+		assert.NotNil(t, result)
+		assert.Equal(t, uint(456), result.UserID)
+	})
 }

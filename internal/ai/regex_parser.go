@@ -142,17 +142,55 @@ func (p *RegexParser) initPatterns() {
 			return hour, 0
 		},
 	})
+
+	// 7. X分钟后提醒: "5分钟后提醒我喝水"
+	p.patterns = append(p.patterns, &ReminderPattern{
+		Pattern: regexp.MustCompile(`(\d+)分钟后提醒我(.+)`),
+		Type:    models.ReminderTypeTask,
+		ScheduleGen: func(matches []string) models.SchedulePattern {
+			minutes, _ := strconv.Atoi(matches[1])
+			targetTime := time.Now().Add(time.Duration(minutes) * time.Minute)
+			return models.SchedulePattern(fmt.Sprintf("once:%s", targetTime.Format("2006-01-02")))
+		},
+		TimeGen: func(matches []string) (int, int) {
+			minutes, _ := strconv.Atoi(matches[1])
+			targetTime := time.Now().Add(time.Duration(minutes) * time.Minute)
+			return targetTime.Hour(), targetTime.Minute()
+		},
+	})
+
+	// 8. X小时后提醒: "2小时后提醒我开会"
+	p.patterns = append(p.patterns, &ReminderPattern{
+		Pattern: regexp.MustCompile(`(\d+)小时后提醒我(.+)`),
+		Type:    models.ReminderTypeTask,
+		ScheduleGen: func(matches []string) models.SchedulePattern {
+			hours, _ := strconv.Atoi(matches[1])
+			targetTime := time.Now().Add(time.Duration(hours) * time.Hour)
+			return models.SchedulePattern(fmt.Sprintf("once:%s", targetTime.Format("2006-01-02")))
+		},
+		TimeGen: func(matches []string) (int, int) {
+			hours, _ := strconv.Atoi(matches[1])
+			targetTime := time.Now().Add(time.Duration(hours) * time.Hour)
+			return targetTime.Hour(), targetTime.Minute()
+		},
+	})
 }
 
 // Parse 实现Parser接口
 func (p *RegexParser) Parse(ctx context.Context, userID string, message string) (*ai.ParseResult, error) {
+	// 调用带上下文的解析，传入空的历史
+	return p.ParseWithContext(ctx, userID, message, "")
+}
+
+// ParseWithContext 实现Parser接口（带上下文支持）
+func (p *RegexParser) ParseWithContext(ctx context.Context, userID string, message string, conversationHistory string) (*ai.ParseResult, error) {
 	message = strings.TrimSpace(message)
 
 	// 遍历所有模式进行匹配
 	for _, pattern := range p.patterns {
 		matches := pattern.Pattern.FindStringSubmatch(message)
 		if len(matches) > 0 {
-			logger.Infof("Regex pattern matched: %s", pattern.Pattern.String())
+			logger.Infof("Regex pattern matched: %s, with context: %v", pattern.Pattern.String(), conversationHistory != "")
 			return p.buildParseResult(matches, pattern), nil
 		}
 	}

@@ -68,10 +68,10 @@ func TestSchedulerService_CronExpression(t *testing.T) {
 		{
 			name: "一次性提醒",
 			reminder: &models.Reminder{
-				SchedulePattern: "once:2025-12-25",
+				SchedulePattern: "once:2026-01-15",
 				TargetTime:      "10:30:00",
 			},
-			wantExpr: "30 10 25 12 *",
+			wantExpr: "30 10 15 1 *",
 			wantErr:  false,
 		},
 		{
@@ -328,6 +328,61 @@ func (m *mockReminderLogRepository) GetUserLogs(ctx context.Context, userID uint
 	var result []*models.ReminderLog
 	for _, log := range m.logs {
 		if log.ScheduledTime.After(since) || log.ScheduledTime.Equal(since) {
+			result = append(result, log)
+		}
+	}
+	return result, nil
+}
+
+func (m *mockReminderLogRepository) CreateDelayReminder(ctx context.Context, originalLogID uint, delayTime time.Time, delayHours int) error {
+	// For testing purposes, just create a new log entry
+	newLog := &models.ReminderLog{
+		ID:           m.idCounter,
+		ReminderID:   originalLogID,
+		ScheduledTime: delayTime,
+		Status:       models.ReminderStatusPending,
+		CreatedAt:    time.Now(),
+	}
+	m.logs[m.idCounter] = newLog
+	m.idCounter++
+	return nil
+}
+
+func (m *mockReminderLogRepository) MarkAsCompleted(ctx context.Context, logID uint, note string) error {
+	if log, exists := m.logs[logID]; exists {
+		log.Status = models.ReminderStatusCompleted
+		log.UserResponse = note
+		now := time.Now()
+		log.ResponseTime = &now
+		return nil
+	}
+	return fmt.Errorf("log not found")
+}
+
+func (m *mockReminderLogRepository) MarkAsSkipped(ctx context.Context, logID uint, note string) error {
+	if log, exists := m.logs[logID]; exists {
+		log.Status = models.ReminderStatusSkipped
+		log.UserResponse = note
+		now := time.Now()
+		log.ResponseTime = &now
+		return nil
+	}
+	return fmt.Errorf("log not found")
+}
+
+func (m *mockReminderLogRepository) UpdateFollowUpCount(ctx context.Context, logID uint) error {
+	if log, exists := m.logs[logID]; exists {
+		log.FollowUpCount++
+		return nil
+	}
+	return fmt.Errorf("log not found")
+}
+
+func (m *mockReminderLogRepository) GetOverdueReminders(ctx context.Context) ([]*models.ReminderLog, error) {
+	var result []*models.ReminderLog
+	now := time.Now()
+	for _, log := range m.logs {
+		if log.Status == models.ReminderStatusPending && log.ScheduledTime.Before(now) {
 			result = append(result, log)
 		}
 	}

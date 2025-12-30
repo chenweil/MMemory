@@ -34,7 +34,7 @@ services:
     volumes:
       # 持久化数据库文件
       - ./data:/app/data
-      
+
       # 可选：挂载自定义配置文件
       # - ./configs/config.yaml:/app/configs/config.yaml:ro
     ports:
@@ -44,12 +44,6 @@ services:
       - "9090:9090"
     networks:
       - mmemory-network
-    healthcheck:
-      test: ["CMD", "ps", "aux", "|", "grep", "mmemory", "|", "grep", "-v", "grep"]
-      interval: 30s
-      timeout: 10s
-      retries: 3
-      start_period: 10s
     logging:
       driver: "json-file"
       options:

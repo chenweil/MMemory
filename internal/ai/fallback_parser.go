@@ -28,9 +28,15 @@ func NewFallbackChatParser() *FallbackChatParser {
 
 // Parse 实现Parser接口
 func (p *FallbackChatParser) Parse(ctx context.Context, userID string, message string) (*ai.ParseResult, error) {
+	// 调用带上下文的解析，传入空的历史
+	return p.ParseWithContext(ctx, userID, message, "")
+}
+
+// ParseWithContext 实现Parser接口（带上下文支持）
+func (p *FallbackChatParser) ParseWithContext(ctx context.Context, userID string, message string, conversationHistory string) (*ai.ParseResult, error) {
 	message = strings.TrimSpace(message)
 
-	logger.Warnf("FallbackChatParser triggered for message: %s", message)
+	logger.Warnf("FallbackChatParser triggered for message: %s, with context: %v", message, conversationHistory != "")
 
 	// 根据消息长度选择不同的回复
 	responseIdx := len(message) % len(p.responses)
@@ -39,6 +45,12 @@ func (p *FallbackChatParser) Parse(ctx context.Context, userID string, message s
 	// 如果消息包含特定关键词，提供更具体的帮助
 	if strings.Contains(message, "帮助") || strings.Contains(message, "怎么用") {
 		response = p.getHelpMessage()
+	}
+
+	// 如果有上下文历史，可以在回复中体现出来（可选增强）
+	if conversationHistory != "" {
+		// 可以基于历史提供更个性化的回复
+		logger.Debugf("Using conversation history in fallback parser: %s", conversationHistory)
 	}
 
 	return &ai.ParseResult{

@@ -46,6 +46,11 @@ func (m *MockParser) Parse(ctx context.Context, userID string, message string) (
 	return m.result, nil
 }
 
+func (m *MockParser) ParseWithContext(ctx context.Context, userID string, message string, conversationHistory string) (*ai.ParseResult, error) {
+	// 模拟上下文解析，目前与Parse相同
+	return m.Parse(ctx, userID, message)
+}
+
 func (m *MockParser) GetName() string {
 	return m.name
 }

@@ -305,15 +305,18 @@ func WrapError(ctx context.Context, err error, service, operation string, detail
 	if err == nil {
 		return nil
 	}
-	
+
 	handler := NewErrorHandler(ctx, service)
 	serviceErr := handler.convertToServiceError(err, operation)
-	
+
 	if len(details) > 0 {
 		for k, v := range details[0] {
 			serviceErr.WithDetail(k, v)
 		}
 	}
-	
+
 	return serviceErr
 }
+
+// ErrReminderNotFound 提醒不存在错误
+var ErrReminderNotFound = fmt.Errorf("reminder not found")

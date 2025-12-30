@@ -172,10 +172,10 @@ func TestNotificationService_SendFollowUp(t *testing.T) {
 		wantContains  []string
 	}{
 		{
-			name:          "第一次关怀消息",
+			name:          "第一次关怀消息-活动追问",
 			followUpCount: 0,
 			wantErr:       false,
-			wantContains:  []string{"还没完成吗", "运动提醒"},
+			wantContains:  []string{"运动完成", "多久", "什么类型"},
 		},
 		{
 			name:          "第二次关怀消息",
@@ -277,9 +277,9 @@ func TestNotificationService_BuildReminderKeyboard(t *testing.T) {
 	logID := uint(123)
 	keyboard := service.buildReminderKeyboard(logID)
 
-	// 验证键盘有两行
-	if len(keyboard.InlineKeyboard) != 2 {
-		t.Errorf("buildReminderKeyboard() 行数 = %d, want 2", len(keyboard.InlineKeyboard))
+	// 验证键盘有三行（因为我们添加了编辑按钮）
+	if len(keyboard.InlineKeyboard) != 3 {
+		t.Errorf("buildReminderKeyboard() 行数 = %d, want 3", len(keyboard.InlineKeyboard))
 	}
 
 	// 验证第一行有2个按钮
@@ -292,10 +292,22 @@ func TestNotificationService_BuildReminderKeyboard(t *testing.T) {
 		t.Errorf("buildReminderKeyboard() 第二行按钮数 = %d, want 2", len(keyboard.InlineKeyboard[1]))
 	}
 
+	// 验证第三行有1个按钮
+	if len(keyboard.InlineKeyboard[2]) != 1 {
+		t.Errorf("buildReminderKeyboard() 第三行按钮数 = %d, want 1", len(keyboard.InlineKeyboard[2]))
+	}
+
 	// 验证按钮数据包含正确的logID
 	completeData := *keyboard.InlineKeyboard[0][0].CallbackData
 	expectedComplete := fmt.Sprintf("reminder_complete_%d", logID)
 	if completeData != expectedComplete {
 		t.Errorf("完成按钮数据 = %s, want %s", completeData, expectedComplete)
+	}
+
+	// 验证编辑按钮数据
+	editData := *keyboard.InlineKeyboard[0][1].CallbackData
+	expectedEdit := fmt.Sprintf("reminder_edit_%d", logID)
+	if editData != expectedEdit {
+		t.Errorf("编辑按钮数据 = %s, want %s", editData, expectedEdit)
 	}
 }

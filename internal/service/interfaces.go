@@ -103,3 +103,10 @@ type ContextManagerService interface {
 type ReminderSuggestionService interface {
 	GenerateSuggestions(ctx context.Context, userID uint, contextState *models.ConversationContextState) ([]ReminderSuggestion, error)
 }
+
+// PatternDetectorService 模式检测服务接口
+type PatternDetectorService interface {
+	DetectPatterns(ctx context.Context, reminders []*models.Reminder) ([]DetectedPattern, error)
+	AnalyzeUserBehavior(ctx context.Context, userID uint) ([]DetectedPattern, error)
+	GetPatternSuggestions(ctx context.Context, userID uint) ([]ReminderSuggestion, error)
+}

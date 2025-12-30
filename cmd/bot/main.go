@@ -62,10 +62,11 @@ func main() {
 
 	// 初始化仓储层
 	userRepo := sqlite.NewUserRepository(database.GetDB())
-	reminderRepo := sqlite.NewReminderRepository(database.GetDB())
+	reminderRepo := sqlite.NewReminderRepository(database.GetDB(), database.GetQueryOptimizer())
 	reminderLogRepo := sqlite.NewReminderLogRepository(database.GetDB())
 	conversationRepo := sqlite.NewConversationRepository(database.GetDB())
 	conversationContextRepo := sqlite.NewConversationContextRepository(database.GetDB())
+	dailyActivityRepo := sqlite.NewDailyActivityRepository(database.GetDB())
 
 	// 初始化Telegram Bot（使用自定义HTTP客户端）
 	botAPI, err := bot.NewBotWithCustomClient(cfg.Bot.Token, cfg.Bot.Debug)
@@ -86,6 +87,7 @@ func main() {
 	schedulerService := service.NewSchedulerService(reminderRepo, reminderLogRepo, notificationService)
 	monitoringService := service.NewMonitoringService(userRepo, reminderRepo, reminderLogRepo)
 	conversationService := service.NewConversationService(conversationRepo)
+	dailyActivityService := service.NewDailyActivityService(dailyActivityRepo)
 	contextManager := service.NewContextManager(
 		conversationContextRepo,
 		&service.DefaultEntityExtractor{},
@@ -126,14 +128,21 @@ func main() {
 			},
 		}
 
-		// 如果Prompt为空，使用默认值
+		// 确保Prompt包含天气功能（无论用户是否自定义）
 		if aiConfig.Prompts.ReminderParse == "" {
 			aiConfig.Prompts.ReminderParse = defaultConfig.Prompts.ReminderParse
-			logger.Info("使用默认的ReminderParse Prompt模板")
+			logger.Info("✅ 使用默认的ReminderParse Prompt模板（包含天气功能）")
+		} else if !strings.Contains(aiConfig.Prompts.ReminderParse, "天气查询") {
+			// 如果自定义Prompt中没有天气功能，则使用默认值
+			logger.Warn("⚠️ 检测到自定义Prompt缺少天气功能，已替换为默认模板")
+			aiConfig.Prompts.ReminderParse = defaultConfig.Prompts.ReminderParse
+		} else {
+			logger.Info("✅ 使用自定义ReminderParse Prompt模板（已包含天气功能）")
 		}
+
 		if aiConfig.Prompts.ChatResponse == "" {
 			aiConfig.Prompts.ChatResponse = defaultConfig.Prompts.ChatResponse
-			logger.Info("使用默认的ChatResponse Prompt模板")
+			logger.Info("✅ 使用默认的ChatResponse Prompt模板")
 		}
 
 		// 验证AI配置
@@ -178,8 +187,16 @@ func main() {
 		}
 	}
 
+	// 初始化天气服务（如果启用）
+	if cfg.Weather.Enabled {
+		logger.Info("🌤️ 天气服务已启用")
+		_ = service.NewQWeatherService(&cfg.Weather)
+	} else {
+		logger.Info("ℹ️ 天气服务未启用，将使用模拟数据")
+	}
+
 	// 初始化消息处理器
-	messageHandler := handlers.NewMessageHandler(reminderService, userService, reminderLogService, aiParserService, conversationService, contextManager, suggestionService)
+	messageHandler := handlers.NewMessageHandler(reminderService, userService, reminderLogService, aiParserService, conversationService, contextManager, suggestionService, dailyActivityService)
 	callbackHandler := handlers.NewCallbackHandler(reminderService, reminderLogService, schedulerService)
 
 	// 启动调度器

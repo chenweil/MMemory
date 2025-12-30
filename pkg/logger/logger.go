@@ -8,6 +8,21 @@ import (
 
 var Logger *logrus.Logger
 
+// GetLogger 获取logger实例
+func GetLogger() *logrus.Logger {
+	if Logger == nil {
+		// 如果logger未初始化，创建默认logger
+		Logger = logrus.New()
+		Logger.SetLevel(logrus.InfoLevel)
+		Logger.SetOutput(os.Stdout)
+		Logger.SetFormatter(&logrus.TextFormatter{
+			FullTimestamp:   true,
+			TimestampFormat: "2006-01-02 15:04:05",
+		})
+	}
+	return Logger
+}
+
 func Init(level, format, output, filePath string) error {
 	Logger = logrus.New()
 

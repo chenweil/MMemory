@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"fmt"
 	"testing"
 	"time"
 
@@ -247,4 +248,264 @@ func TestConversationService_GetContextData(t *testing.T) {
 	assert.Equal(t, "content", target["step"])
 	assert.Equal(t, "test message", target["message"])
 	mockRepo.AssertExpectations(t)
+}
+
+func TestConversationService_GetContextData_Errors(t *testing.T) {
+	t.Run("无对话时返回错误", func(t *testing.T) {
+		mockRepo := &MockConversationRepository{}
+		service := NewConversationService(mockRepo)
+
+		ctx := context.Background()
+		userID := uint(1)
+		contextType := models.ContextTypeCreatingReminder
+
+		mockRepo.On("GetByUserID", ctx, userID, contextType).Return(nil, nil)
+
+		var target map[string]interface{}
+		err := service.GetContextData(ctx, userID, contextType, &target)
+
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "no active conversation")
+		mockRepo.AssertExpectations(t)
+	})
+
+	t.Run("JSON解析失败时返回错误", func(t *testing.T) {
+		mockRepo := &MockConversationRepository{}
+		service := NewConversationService(mockRepo)
+
+		ctx := context.Background()
+		userID := uint(1)
+		contextType := models.ContextTypeCreatingReminder
+
+		conversation := &models.Conversation{
+			ID:          1,
+			UserID:      userID,
+			ContextType: contextType,
+			ContextData: `invalid json`,
+			ExpiresAt:   &[]time.Time{time.Now().Add(1 * time.Hour)}[0],
+		}
+
+		mockRepo.On("GetByUserID", ctx, userID, contextType).Return(conversation, nil)
+
+		var target map[string]interface{}
+		err := service.GetContextData(ctx, userID, contextType, &target)
+
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "failed to unmarshal")
+		mockRepo.AssertExpectations(t)
+	})
+}
+
+func TestConversationService_CleanupExpiredConversations(t *testing.T) {
+	t.Run("成功清理过期对话", func(t *testing.T) {
+		mockRepo := &MockConversationRepository{}
+		service := NewConversationService(mockRepo)
+
+		ctx := context.Background()
+
+		mockRepo.On("DeleteExpired", ctx).Return(nil)
+
+		err := service.CleanupExpiredConversations(ctx)
+
+		assert.NoError(t, err)
+		mockRepo.AssertExpectations(t)
+	})
+
+	t.Run("清理失败时返回错误", func(t *testing.T) {
+		mockRepo := &MockConversationRepository{}
+		service := NewConversationService(mockRepo)
+
+		ctx := context.Background()
+		expectedErr := fmt.Errorf("database error")
+
+		mockRepo.On("DeleteExpired", ctx).Return(expectedErr)
+
+		err := service.CleanupExpiredConversations(ctx)
+
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "failed to cleanup")
+		mockRepo.AssertExpectations(t)
+	})
+}
+
+func TestConversationService_CreateConversation_Errors(t *testing.T) {
+	t.Run("JSON序列化失败", func(t *testing.T) {
+		mockRepo := &MockConversationRepository{}
+		service := NewConversationService(mockRepo)
+
+		ctx := context.Background()
+		userID := uint(1)
+		contextType := models.ContextTypeCreatingReminder
+
+		// 使用无法序列化的对象
+		nonSerializable := make(chan int)
+
+		_, err := service.CreateConversation(ctx, userID, contextType, nonSerializable, 30*time.Minute)
+
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "failed to marshal")
+	})
+
+	t.Run("仓库创建失败", func(t *testing.T) {
+		mockRepo := &MockConversationRepository{}
+		service := NewConversationService(mockRepo)
+
+		ctx := context.Background()
+		userID := uint(1)
+		contextType := models.ContextTypeCreatingReminder
+		contextData := map[string]interface{}{"step": "content"}
+		expectedErr := fmt.Errorf("database error")
+
+		mockRepo.On("Create", ctx, mock.AnythingOfType("*models.Conversation")).Return(expectedErr)
+
+		_, err := service.CreateConversation(ctx, userID, contextType, contextData, 30*time.Minute)
+
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "failed to create conversation")
+	})
+
+	t.Run("TTL为0时不设置过期时间", func(t *testing.T) {
+		mockRepo := &MockConversationRepository{}
+		service := NewConversationService(mockRepo)
+
+		ctx := context.Background()
+		userID := uint(1)
+		contextType := models.ContextTypeCreatingReminder
+		contextData := map[string]interface{}{"step": "content"}
+
+		mockRepo.On("Create", ctx, mock.MatchedBy(func(c *models.Conversation) bool {
+			return c.UserID == userID && c.ExpiresAt == nil
+		})).Return(nil)
+
+		conversation, err := service.CreateConversation(ctx, userID, contextType, contextData, 0)
+
+		assert.NoError(t, err)
+		assert.NotNil(t, conversation)
+		assert.Nil(t, conversation.ExpiresAt)
+		mockRepo.AssertExpectations(t)
+	})
+}
+
+func TestConversationService_GetConversation_Errors(t *testing.T) {
+	t.Run("仓库返回错误", func(t *testing.T) {
+		mockRepo := &MockConversationRepository{}
+		service := NewConversationService(mockRepo)
+
+		ctx := context.Background()
+		userID := uint(1)
+		contextType := models.ContextTypeCreatingReminder
+		expectedErr := fmt.Errorf("database error")
+
+		mockRepo.On("GetByUserID", ctx, userID, contextType).Return(nil, expectedErr)
+
+		conversation, err := service.GetConversation(ctx, userID, contextType)
+
+		assert.Error(t, err)
+		assert.Nil(t, conversation)
+		assert.Contains(t, err.Error(), "failed to get conversation")
+		mockRepo.AssertExpectations(t)
+	})
+}
+
+func TestConversationService_UpdateConversation_Errors(t *testing.T) {
+	t.Run("JSON序列化失败", func(t *testing.T) {
+		mockRepo := &MockConversationRepository{}
+		service := NewConversationService(mockRepo)
+
+		ctx := context.Background()
+		conversation := &models.Conversation{
+			ID:          1,
+			UserID:      1,
+			ContextType: models.ContextTypeCreatingReminder,
+		}
+
+		// 使用无法序列化的对象
+		nonSerializable := make(chan int)
+
+		err := service.UpdateConversation(ctx, conversation, nonSerializable)
+
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "failed to marshal")
+	})
+
+	t.Run("仓库更新失败", func(t *testing.T) {
+		mockRepo := &MockConversationRepository{}
+		service := NewConversationService(mockRepo)
+
+		ctx := context.Background()
+		conversation := &models.Conversation{
+			ID:          1,
+			UserID:      1,
+			ContextType: models.ContextTypeCreatingReminder,
+			ContextData: `{}`,
+		}
+		contextData := map[string]interface{}{"step": "updated"}
+		expectedErr := fmt.Errorf("database error")
+
+		mockRepo.On("Update", ctx, mock.AnythingOfType("*models.Conversation")).Return(expectedErr)
+
+		err := service.UpdateConversation(ctx, conversation, contextData)
+
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "failed to update conversation")
+	})
+}
+
+func TestConversationService_ClearConversation_Errors(t *testing.T) {
+	t.Run("获取对话失败", func(t *testing.T) {
+		mockRepo := &MockConversationRepository{}
+		service := NewConversationService(mockRepo)
+
+		ctx := context.Background()
+		userID := uint(1)
+		contextType := models.ContextTypeCreatingReminder
+		expectedErr := fmt.Errorf("database error")
+
+		mockRepo.On("GetByUserID", ctx, userID, contextType).Return(nil, expectedErr)
+
+		err := service.ClearConversation(ctx, userID, contextType)
+
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "failed to get conversation")
+	})
+
+	t.Run("删除对话失败", func(t *testing.T) {
+		mockRepo := &MockConversationRepository{}
+		service := NewConversationService(mockRepo)
+
+		ctx := context.Background()
+		userID := uint(1)
+		contextType := models.ContextTypeCreatingReminder
+		expectedErr := fmt.Errorf("database error")
+
+		existingConversation := &models.Conversation{
+			ID:          1,
+			UserID:      userID,
+			ContextType: contextType,
+		}
+
+		mockRepo.On("GetByUserID", ctx, userID, contextType).Return(existingConversation, nil)
+		mockRepo.On("Delete", ctx, uint(1)).Return(expectedErr)
+
+		err := service.ClearConversation(ctx, userID, contextType)
+
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "failed to delete conversation")
+	})
+
+	t.Run("无对话时不返回错误", func(t *testing.T) {
+		mockRepo := &MockConversationRepository{}
+		service := NewConversationService(mockRepo)
+
+		ctx := context.Background()
+		userID := uint(1)
+		contextType := models.ContextTypeCreatingReminder
+
+		mockRepo.On("GetByUserID", ctx, userID, contextType).Return(nil, nil)
+
+		err := service.ClearConversation(ctx, userID, contextType)
+
+		assert.NoError(t, err)
+		mockRepo.AssertExpectations(t)
+	})
 }

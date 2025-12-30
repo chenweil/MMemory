@@ -47,16 +47,12 @@ RUN chown -R mmemory:mmemory /app
 # 切换到非root用户
 USER mmemory
 
-# 暴露端口（如果需要健康检查接口）
-EXPOSE 8080
+ # 暴露端口（如果需要健康检查接口）
+ EXPOSE 8080
 
-# 设置环境变量
-ENV ENVIRONMENT=production
-ENV DATABASE_PATH=/app/data/mmemory.db
+ # 设置环境变量
+ ENV ENVIRONMENT=production
+ ENV DATABASE_PATH=/app/data/mmemory.db
 
-# 健康检查
-HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
-  CMD ps aux | grep mmemory | grep -v grep || exit 1
-
-# 启动应用
-CMD ["./mmemory"]
+ # 启动应用
+ CMD ["./mmemory"]

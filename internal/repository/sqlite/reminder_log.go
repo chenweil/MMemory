@@ -3,6 +3,7 @@ package sqlite
 import (
 	"context"
 	"errors"
+	"fmt"
 	"time"
 
 	"gorm.io/gorm"
@@ -88,4 +89,77 @@ func (r *reminderLogRepository) GetUserLogs(ctx context.Context, userID uint, si
 	}
 
 	return logs, nil
+}
+
+// CreateDelayReminder 创建延期提醒
+func (r *reminderLogRepository) CreateDelayReminder(ctx context.Context, originalLogID uint, delayTime time.Time, delayHours int) error {
+	// 获取原始提醒记录
+	var originalLog models.ReminderLog
+	if err := r.db.WithContext(ctx).
+		Preload("Reminder").
+		First(&originalLog, originalLogID).Error; err != nil {
+		return err
+	}
+
+	// 创建新的提醒记录
+	delayLog := &models.ReminderLog{
+		ReminderID:    originalLog.ReminderID,
+		ScheduledTime: delayTime,
+		Status:        models.ReminderStatusPending,
+		UserResponse:   fmt.Sprintf("延期%d小时", delayHours),
+	}
+
+	if err := r.db.WithContext(ctx).Create(delayLog).Error; err != nil {
+		return err
+	}
+
+	return nil
+}
+
+// MarkAsCompleted 标记为已完成
+func (r *reminderLogRepository) MarkAsCompleted(ctx context.Context, logID uint, note string) error {
+	return r.db.WithContext(ctx).
+		Model(&models.ReminderLog{}).
+		Where("id = ?", logID).
+		Updates(map[string]interface{}{
+			"status":        models.ReminderStatusCompleted,
+			"user_response":  note,
+			"response_time":  time.Now(),
+		}).Error
+}
+
+// MarkAsSkipped 标记为已跳过
+func (r *reminderLogRepository) MarkAsSkipped(ctx context.Context, logID uint, note string) error {
+	return r.db.WithContext(ctx).
+		Model(&models.ReminderLog{}).
+		Where("id = ?", logID).
+		Updates(map[string]interface{}{
+			"status":       models.ReminderStatusSkipped,
+			"user_response": note,
+			"response_time": time.Now(),
+		}).Error
+}
+
+// UpdateFollowUpCount 更新关怀次数
+func (r *reminderLogRepository) UpdateFollowUpCount(ctx context.Context, logID uint) error {
+	return r.db.WithContext(ctx).
+		Model(&models.ReminderLog{}).
+		Where("id = ?", logID).
+		UpdateColumn("follow_up_count", gorm.Expr("follow_up_count + 1")).Error
+}
+
+// GetOverdueReminders 获取超时的提醒
+func (r *reminderLogRepository) GetOverdueReminders(ctx context.Context) ([]*models.ReminderLog, error) {
+	var logs []*models.ReminderLog
+
+	// 超时时间定义为超过2小时未处理的提醒
+	overdueTime := time.Now().Add(-2 * time.Hour)
+
+	err := r.db.WithContext(ctx).
+		Preload("Reminder").
+		Preload("Reminder.User").
+		Where("status = ? AND scheduled_time < ?", models.ReminderStatusSent, overdueTime).
+		Find(&logs).Error
+
+	return logs, err
 }
