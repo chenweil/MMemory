@@ -34,6 +34,9 @@ type MessageHandler struct {
 
 	// 活动可视化服务
 	activityVisualizationService service.ActivityVisualizationService
+
+	// 智能分析服务
+	activityAnalysisService service.ActivityAnalysisService
 }
 
 type conversationContextKey struct{}
@@ -65,6 +68,7 @@ func NewMessageHandler(
 	suggestionService service.ReminderSuggestionService,
 	dailyActivityService service.DailyActivityService,
 	activityVisualizationService service.ActivityVisualizationService,
+	activityAnalysisService service.ActivityAnalysisService,
 ) *MessageHandler {
 	return &MessageHandler{
 		reminderService:                reminderService,
@@ -76,6 +80,7 @@ func NewMessageHandler(
 		suggestionService:              suggestionService,
 		dailyActivityService:           dailyActivityService,
 		activityVisualizationService:   activityVisualizationService,
+		activityAnalysisService:        activityAnalysisService,
 	}
 }
 
@@ -405,6 +410,8 @@ func (h *MessageHandler) handleWithAI(ctx context.Context, bot botinterface.BotA
 		return h.handleQueryActivityIntent(ctx, bot, message, user, parseResult)
 	case ai.IntentActivityVisualize:
 		return h.handleActivityVisualizeIntent(ctx, bot, message, user, parseResult)
+	case ai.IntentActivityAnalysis:
+		return h.handleActivityAnalysisIntent(ctx, bot, message, user, parseResult)
 	case ai.IntentChat:
 		return h.handleChatIntent(ctx, bot, message, user, parseResult)
 	case ai.IntentSummary:
@@ -912,6 +919,305 @@ func (h *MessageHandler) formatCompletionRate(completion *service.CompletionRate
 	result += fmt.Sprintf("✅ 已完成: %d 条\n", completion.CompletedRecords)
 	result += fmt.Sprintf("🎯 完成率: %.1f%%\n", completion.Rate*100)
 	result += fmt.Sprintf("\n📈 趋势: %s\n", service.FormatTrend(completion.Trend))
+
+	return result
+}
+
+// handleActivityAnalysisIntent 处理智能分析意图
+func (h *MessageHandler) handleActivityAnalysisIntent(ctx context.Context, bot botinterface.BotAPI, message *tgbotapi.Message, user *models.User, parseResult *ai.ParseResult) error {
+	if h.activityAnalysisService == nil {
+		return h.sendMessage(bot, message.Chat.ID, "智能分析功能暂未启用")
+	}
+
+	if parseResult.ActivityAnalysis == nil {
+		return h.sendMessage(bot, message.Chat.ID, "无法识别分析请求")
+	}
+
+	analysisInfo := parseResult.ActivityAnalysis
+
+	// 确定时间范围
+	days := analysisInfo.Days
+	if days <= 0 {
+		days = 30
+	}
+
+	// 确定活动类型
+	activityType := analysisInfo.ActivityType
+	if activityType == "" {
+		activityType = "all"
+	}
+
+	var response string
+	var err error
+
+	switch analysisInfo.AnalysisType {
+	case "pattern":
+		// 活动模式分析
+		patterns, err := h.activityAnalysisService.DetectPatterns(ctx, user.ID, activityType, days)
+		if err != nil {
+			return h.sendErrorMessage(bot, message.Chat.ID, "分析活动模式失败，请稍后重试")
+		}
+		response = h.formatActivityPatterns(patterns)
+
+	case "anomaly":
+		// 异常检测
+		anomalies, err := h.activityAnalysisService.DetectAnomalies(ctx, user.ID, activityType, 7)
+		if err != nil {
+			return h.sendErrorMessage(bot, message.Chat.ID, "检测活动异常失败，请稍后重试")
+		}
+		response = h.formatActivityAnomalies(anomalies)
+
+	case "suggestion":
+		// 智能建议
+		suggestions, err := h.activityAnalysisService.GenerateSuggestions(ctx, user.ID)
+		if err != nil {
+			return h.sendErrorMessage(bot, message.Chat.ID, "生成智能建议失败，请稍后重试")
+		}
+		response = h.formatActivitySuggestions(suggestions)
+
+	case "habit":
+		// 习惯形成分析
+		report, err := h.activityAnalysisService.AnalyzeHabitFormation(ctx, user.ID, activityType)
+		if err != nil {
+			return h.sendErrorMessage(bot, message.Chat.ID, "分析习惯形成失败，请稍后重试")
+		}
+		response = h.formatHabitFormationReport(report)
+
+	case "insight", "all":
+		// 综合洞察
+		insights, err := h.activityAnalysisService.GetActivityInsights(ctx, user.ID, days)
+		if err != nil {
+			return h.sendErrorMessage(bot, message.Chat.ID, "获取活动洞察失败，请稍后重试")
+		}
+		response = h.formatActivityInsights(insights)
+
+	default:
+		// 默认返回综合洞察
+		insights, err := h.activityAnalysisService.GetActivityInsights(ctx, user.ID, days)
+		if err != nil {
+			return h.sendErrorMessage(bot, message.Chat.ID, "获取活动洞察失败，请稍后重试")
+		}
+		response = h.formatActivityInsights(insights)
+	}
+
+	if err != nil {
+		logger.Errorf("智能分析失败: %v", err)
+		return h.sendErrorMessage(bot, message.Chat.ID, "智能分析失败，请稍后重试")
+	}
+
+	return h.sendMessage(bot, message.Chat.ID, response)
+}
+
+// formatActivityPatterns 格式化活动模式
+func (h *MessageHandler) formatActivityPatterns(patterns []service.ActivityPattern) string {
+	if len(patterns) == 0 {
+		return "📊 暂无足够的活动数据进行分析\n\n请先记录更多活动数据（至少3天）。"
+	}
+
+	result := "📊 <b>活动模式分析</b>\n\n"
+
+	for i, pattern := range patterns {
+		if i >= 3 {
+			break
+		}
+		displayName := getActivityTypeDisplayName(models.ActivityType(pattern.ActivityType))
+
+		result += fmt.Sprintf("📌 <b>%s</b>\n", displayName)
+		result += fmt.Sprintf("  • 频率: %.1f%%/天\n", pattern.Frequency*100)
+		result += fmt.Sprintf("  • 平均时间: %s\n", pattern.AverageTime)
+		result += fmt.Sprintf("  • 连续完成: %d 天\n", pattern.Streak)
+		result += fmt.Sprintf("  • 一致性评分: %.1f分\n", pattern.ConsistencyScore)
+
+		// 模式类型
+		patternType := "偶尔"
+		switch pattern.PatternType {
+		case "stable_daily":
+			patternType = "稳定每天"
+		case "regular":
+			patternType = "经常"
+		case "occasional":
+			patternType = "偶尔"
+		}
+		result += fmt.Sprintf("  • 模式: %s\n\n", patternType)
+	}
+
+	return result
+}
+
+// formatActivityAnomalies 格式化活动异常
+func (h *MessageHandler) formatActivityAnomalies(anomalies []service.ActivityAnomaly) string {
+	if len(anomalies) == 0 {
+		return "🎉 没有检测到任何异常！\n\n你的活动执行情况非常好，继续保持！"
+	}
+
+	result := "⚠️ <b>检测到以下异常</b>\n\n"
+
+	for i, anomaly := range anomalies {
+		if i >= 5 {
+			break
+		}
+		displayName := getActivityTypeDisplayName(models.ActivityType(anomaly.ActivityType))
+
+		// 严重程度图标
+		icon := "ℹ️"
+		switch anomaly.Severity {
+		case "high":
+			icon = "🔴"
+		case "medium":
+			icon = "🟡"
+		case "low":
+			icon = "🟢"
+		}
+
+		result += fmt.Sprintf("%s <b>%s</b>\n", icon, displayName)
+		result += fmt.Sprintf("   %s\n", anomaly.Description)
+		result += "\n"
+	}
+
+	return result
+}
+
+// formatActivitySuggestions 格式化智能建议
+func (h *MessageHandler) formatActivitySuggestions(suggestions []service.ActivitySuggestion) string {
+	if len(suggestions) == 0 {
+		return "💡 暂时没有新的建议\n\n继续保持当前的活动节奏！"
+	}
+
+	result := "💡 <b>智能建议</b>\n\n"
+
+	for i, suggestion := range suggestions {
+		if i >= 5 {
+			break
+		}
+
+		// 优先级图标
+		priorityIcon := "📌"
+		switch suggestion.Priority {
+		case 1:
+			priorityIcon = "🔴"
+		case 2:
+			priorityIcon = "🟡"
+		case 3:
+			priorityIcon = "🟢"
+		}
+
+		result += fmt.Sprintf("%s <b>%s</b>\n", priorityIcon, suggestion.Title)
+		result += fmt.Sprintf("   %s\n", suggestion.Description)
+
+		if len(suggestion.ActionItems) > 0 {
+			result += "   建议行动：\n"
+			for _, item := range suggestion.ActionItems {
+				result += fmt.Sprintf("   • %s\n", item)
+			}
+		}
+		result += "\n"
+	}
+
+	return result
+}
+
+// formatHabitFormationReport 格式化习惯形成报告
+func (h *MessageHandler) formatHabitFormationReport(report *service.HabitFormationReport) string {
+	displayName := getActivityTypeDisplayName(models.ActivityType(report.ActivityType))
+
+	// 阶段名称
+	stageName := "启动期"
+	switch report.Stage {
+	case "initiating":
+		stageName = "启动期"
+	case "forming":
+		stageName = "形成期"
+	case "established":
+		stageName = "稳定期"
+	case "master":
+		stageName = "精通期"
+	}
+
+	result := fmt.Sprintf("🌱 <b>%s - 习惯养成报告</b>\n\n", displayName)
+	result += fmt.Sprintf("📊 总体完成率: %.0f%%\n", report.CompletionRate*100)
+	result += fmt.Sprintf("🔥 当前连续: %d 天\n", report.CurrentStreak)
+	result += fmt.Sprintf("🏆 最长连续: %d 天\n", report.LongestStreak)
+	result += fmt.Sprintf("📈 一致性评分: %.1f 分\n", report.ConsistencyScore)
+
+	result += fmt.Sprintf("\n🎯 <b>当前阶段: %s</b>\n", stageName)
+	result += fmt.Sprintf("   进度: %.0f%%\n", report.StageProgress*100)
+
+	if report.BestDayOfWeek != "" {
+		result += fmt.Sprintf("   最佳日: %s\n", report.BestDayOfWeek)
+	}
+	if report.BestTimeOfDay != "" {
+		result += fmt.Sprintf("   最佳时: %s\n", report.BestTimeOfDay)
+	}
+
+	if len(report.Recommendations) > 0 {
+		result += "\n💡 <b>建议</b>\n"
+		for _, rec := range report.Recommendations {
+			result += fmt.Sprintf("   • %s\n", rec)
+		}
+	}
+
+	return result
+}
+
+// formatActivityInsights 格式化活动洞察
+func (h *MessageHandler) formatActivityInsights(insights *service.ActivityInsights) string {
+	result := fmt.Sprintf("📊 <b>活动洞察 - %s</b>\n\n", insights.Period)
+
+	// 整体评分
+	scoreIcon := "📊"
+	if insights.OverallScore >= 80 {
+		scoreIcon = "🌟"
+	} else if insights.OverallScore >= 60 {
+		scoreIcon = "👍"
+	} else if insights.OverallScore >= 40 {
+		scoreIcon = "⚡"
+	} else {
+		scoreIcon = "💪"
+	}
+
+	result += fmt.Sprintf("%s 整体评分: %.1f 分\n\n", scoreIcon, insights.OverallScore)
+
+	// 摘要
+	if insights.Summary != "" {
+		result += fmt.Sprintf("%s\n\n", insights.Summary)
+	}
+
+	// 最佳表现
+	if len(insights.MostConsistent) > 0 {
+		result += "🏆 <b>最佳表现</b>\n"
+		for i, pattern := range insights.MostConsistent {
+			if i >= 2 {
+				break
+			}
+			displayName := getActivityTypeDisplayName(models.ActivityType(pattern.ActivityType))
+			result += fmt.Sprintf("   %s %s (%.1f分)\n", scoreIcon, displayName, pattern.ConsistencyScore)
+		}
+		result += "\n"
+	}
+
+	// 需要关注
+	if len(insights.NeedsAttention) > 0 {
+		result += "⚠️ <b>需要关注</b>\n"
+		for i, anomaly := range insights.NeedsAttention {
+			if i >= 2 {
+				break
+			}
+			displayName := getActivityTypeDisplayName(models.ActivityType(anomaly.ActivityType))
+			result += fmt.Sprintf("   • %s: %s\n", displayName, anomaly.Description)
+		}
+		result += "\n"
+	}
+
+	// 建议
+	if len(insights.TopSuggestions) > 0 {
+		result += "💡 <b>智能建议</b>\n"
+		for i, suggestion := range insights.TopSuggestions {
+			if i >= 2 {
+				break
+			}
+			result += fmt.Sprintf("   %d. %s\n", i+1, suggestion.Title)
+		}
+	}
 
 	return result
 }

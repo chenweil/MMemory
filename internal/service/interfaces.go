@@ -150,9 +150,106 @@ type DailyData struct {
 
 // CompletionRate 活动完成率
 type CompletionRate struct {
-	ActivityType    string  `json:"activity_type"`
-	TotalRecords    int64   `json:"total_records"`
-	CompletedRecords int64  `json:"completed_records"`
-	Rate            float64 `json:"rate"` // 0.0 - 1.0
-	Trend           string  `json:"trend"`
+	ActivityType     string  `json:"activity_type"`
+	TotalRecords     int64   `json:"total_records"`
+	CompletedRecords int64   `json:"completed_records"`
+	Rate             float64 `json:"rate"` // 0.0 - 1.0
+	Trend            string  `json:"trend"`
+}
+
+// ActivityPattern 活动模式
+type ActivityPattern struct {
+	PatternID       string                 `json:"pattern_id"`
+	ActivityType    string                 `json:"activity_type"`
+	PatternType     string                 `json:"pattern_type"` // "daily", "weekly", "monthly"
+	Frequency       float64                `json:"frequency"`    // 完成频率 0.0-1.0
+	AverageTime     string                 `json:"average_time"` // 平均执行时间 "09:30"
+	TimeVariance    float64                `json:"time_variance"` // 时间方差
+	Streak          int                    `json:"streak"`       // 当前连续天数
+	LongestStreak   int                    `json:"longest_streak"`
+	ConsistencyScore float64               `json:"consistency_score"` // 一致性评分 0-100
+	FirstRecorded   time.Time              `json:"first_recorded"`
+	LastRecorded    time.Time              `json:"last_recorded"`
+	WeeklyDistribution map[string]float64  `json:"weekly_distribution"` // {"周一": 0.8, "周二": 0.9}
+	HourlyDistribution map[int]float64     `json:"hourly_distribution"`  // {9: 0.7, 10: 0.8}
+}
+
+// ActivityAnomaly 活动异常
+type ActivityAnomaly struct {
+	AnomalyID       string    `json:"anomaly_id"`
+	UserID          uint      `json:"user_id"`
+	ActivityType    string    `json:"activity_type"`
+	AnomalyType     string    `json:"anomaly_type"` // "missing", "late", "early", "overdue", "frequency_drop"
+	Severity        string    `json:"severity"`     // "low", "medium", "high"
+	Description     string    `json:"description"`
+	ExpectedTime    string    `json:"expected_time,omitempty"`
+	ActualTime      string    `json:"actual_time,omitempty"`
+	ExpectedCount   int       `json:"expected_count"`
+	ActualCount     int       `json:"actual_count"`
+	DetectedAt      time.Time `json:"detected_at"`
+	Resolved        bool      `json:"resolved"`
+	ResolvedAt      *time.Time `json:"resolved_at,omitempty"`
+}
+
+// ActivitySuggestion 智能建议
+type ActivitySuggestion struct {
+	SuggestionID    string   `json:"suggestion_id"`
+	SuggestionType  string   `json:"suggestion_type"` // "timing", "frequency", "reminder", "insight"
+	Priority        int      `json:"priority"`        // 1-5, 1最高
+	ActivityType    string   `json:"activity_type"`
+	Title           string   `json:"title"`
+	Description     string   `json:"description"`
+	Reason          string   `json:"reason"`         // 基于什么数据分析
+	ActionItems     []string `json:"action_items"`   // 建议采取的行动
+	Confidence      float64  `json:"confidence"`     // 0.0-1.0
+	BasedOnDays     int      `json:"based_on_days"`  // 基于多少天的数据
+	CreatedAt       time.Time `json:"created_at"`
+}
+
+// ActivityAnalysisService 智能分析服务接口
+type ActivityAnalysisService interface {
+	// DetectPatterns 检测用户活动模式
+	DetectPatterns(ctx context.Context, userID uint, activityType string, days int) ([]ActivityPattern, error)
+
+	// AnalyzeTimeDistribution 分析时间分布
+	AnalyzeTimeDistribution(ctx context.Context, userID uint, activityType string, days int) (string, error)
+
+	// DetectAnomalies 检测活动异常
+	DetectAnomalies(ctx context.Context, userID uint, activityType string, days int) ([]ActivityAnomaly, error)
+
+	// GenerateSuggestions 生成智能建议
+	GenerateSuggestions(ctx context.Context, userID uint) ([]ActivitySuggestion, error)
+
+	// AnalyzeHabitFormation 分析习惯形成情况
+	AnalyzeHabitFormation(ctx context.Context, userID uint, activityType string) (*HabitFormationReport, error)
+
+	// GetActivityInsights 获取综合洞察
+	GetActivityInsights(ctx context.Context, userID uint, days int) (*ActivityInsights, error)
+}
+
+// HabitFormationReport 习惯形成报告
+type HabitFormationReport struct {
+	ActivityType      string  `json:"activity_type"`
+	TotalDays         int     `json:"total_days"`
+	CompletionRate    float64 `json:"completion_rate"` // 0.0-1.0
+	CurrentStreak     int     `json:"current_streak"`
+	LongestStreak     int     `json:"longest_streak"`
+	Stage             string  `json:"stage"` // "initiating", "forming", "established", "master"
+	StageProgress     float64 `json:"stage_progress"` // 0.0-1.0
+	BestDayOfWeek     string  `json:"best_day_of_week"`
+	BestTimeOfDay     string  `json:"best_time_of_day"`
+	ConsistencyScore  float64 `json:"consistency_score"` // 0-100
+	Recommendations   []string `json:"recommendations"`
+}
+
+// ActivityInsights 活动综合洞察
+type ActivityInsights struct {
+	UserID            uint                `json:"user_id"`
+	Period            string              `json:"period"`
+	MostConsistent    []ActivityPattern   `json:"most_consistent"`
+	NeedsAttention    []ActivityAnomaly   `json:"needs_attention"`
+	TopSuggestions    []ActivitySuggestion `json:"top_suggestions"`
+	OverallScore      float64             `json:"overall_score"` // 0-100
+	Summary           string              `json:"summary"`
+	GeneratedAt       time.Time           `json:"generated_at"`
 }

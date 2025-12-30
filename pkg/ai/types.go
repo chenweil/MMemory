@@ -11,20 +11,21 @@ import (
 type ParseIntent string
 
 const (
-	IntentReminder          ParseIntent = "reminder"            // 创建提醒
-	IntentDelete            ParseIntent = "delete"              // 删除提醒
-	IntentEdit              ParseIntent = "edit"                // 编辑提醒
-	IntentPause             ParseIntent = "pause"               // 暂停提醒
-	IntentResume            ParseIntent = "resume"              // 恢复提醒
-	IntentChat              ParseIntent = "chat"                // 普通对话
-	IntentSummary           ParseIntent = "summary"             // 总结请求
-	IntentQuery             ParseIntent = "query"               // 查询提醒
-	IntentWeather           ParseIntent = "weather"             // 天气查询
-	IntentRecordActivity    ParseIntent = "record_activity"     // 记录活动
-	IntentQueryActivity     ParseIntent = "query_activity"      // 查询活动
-	IntentActivitySummary   ParseIntent = "activity_summary"    // 活动统计
+	IntentReminder         ParseIntent = "reminder"             // 创建提醒
+	IntentDelete           ParseIntent = "delete"               // 删除提醒
+	IntentEdit             ParseIntent = "edit"                 // 编辑提醒
+	IntentPause            ParseIntent = "pause"                // 暂停提醒
+	IntentResume           ParseIntent = "resume"               // 恢复提醒
+	IntentChat             ParseIntent = "chat"                 // 普通对话
+	IntentSummary          ParseIntent = "summary"              // 总结请求
+	IntentQuery            ParseIntent = "query"                // 查询提醒
+	IntentWeather          ParseIntent = "weather"              // 天气查询
+	IntentRecordActivity   ParseIntent = "record_activity"      // 记录活动
+	IntentQueryActivity    ParseIntent = "query_activity"       // 查询活动
+	IntentActivitySummary  ParseIntent = "activity_summary"     // 活动统计
 	IntentActivityVisualize ParseIntent = "activity_visualize"  // 活动可视化
-	IntentUnknown           ParseIntent = "unknown"             // 未知意图
+	IntentActivityAnalysis ParseIntent = "activity_analysis"    // 智能分析
+	IntentUnknown          ParseIntent = "unknown"              // 未知意图
 )
 
 // IsValid 检查意图是否有效
@@ -43,6 +44,7 @@ func (i ParseIntent) IsValid() bool {
 		IntentQueryActivity,
 		IntentActivitySummary,
 		IntentActivityVisualize,
+		IntentActivityAnalysis,
 		IntentUnknown:
 		return true
 	default:
@@ -87,6 +89,9 @@ type ParseResult struct {
 
 	// 活动可视化相关（当Intent为activity_visualize时）
 	ActivityVisualize *ActivityVisualizeInfo `json:"activity_visualize,omitempty"`
+
+	// 智能分析相关（当Intent为activity_analysis时）
+	ActivityAnalysis *ActivityAnalysisInfo `json:"activity_analysis,omitempty"`
 
 	// 对话相关（当Intent为chat时）
 	ChatResponse *ChatInfo `json:"chat_response,omitempty"`
@@ -176,6 +181,14 @@ type ActivityVisualizeInfo struct {
 	ActivityType  string `json:"activity_type,omitempty"` // 活动类型，如 "drink_water", "exercise"
 	TimeRange     string `json:"time_range,omitempty"`    // "今天", "昨天", "最近7天", "这周", "最近30天"
 	Days          int    `json:"days,omitempty"`          // 自定义天数
+}
+
+// ActivityAnalysisInfo 智能分析信息
+type ActivityAnalysisInfo struct {
+	AnalysisType string `json:"analysis_type"`         // "pattern", "anomaly", "suggestion", "habit", "insight", "all"
+	ActivityType string `json:"activity_type,omitempty"` // 活动类型，如 "drink_water", "exercise"
+	TimeRange    string `json:"time_range,omitempty"`    // "今天", "昨天", "最近7天", "这周", "最近30天"
+	Days         int    `json:"days,omitempty"`          // 自定义天数
 }
 
 // ChatResponse 对话响应（用于Chat接口）

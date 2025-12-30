@@ -289,6 +289,7 @@ func TestHandleReminderIntent_Success(t *testing.T) {
 		nil, // suggestionService
 		nil, // dailyActivityService
 		nil, // activityVisualizationService
+		nil, // activityAnalysisService
 	)
 
 	// 准备测试数据
@@ -342,6 +343,7 @@ func TestHandleReminderIntent_MissingInfo(t *testing.T) {
 		nil, // suggestionService
 		nil, // dailyActivityService
 		nil, // activityVisualizationService
+		nil, // activityAnalysisService
 	)
 
 	_ = context.Background()
@@ -380,6 +382,7 @@ func TestHandleChatIntent_Success(t *testing.T) {
 		nil, // suggestionService
 		nil, // dailyActivityService
 		nil, // activityVisualizationService
+		nil, // activityAnalysisService
 	)
 
 	_ = context.Background()
@@ -421,6 +424,7 @@ func TestHandleSummaryIntent_Success(t *testing.T) {
 		nil, // suggestionService
 		nil, // dailyActivityService
 		nil, // activityVisualizationService
+		nil, // activityAnalysisService
 	)
 
 	ctx := context.Background()
@@ -467,6 +471,7 @@ func TestHandleQueryIntent_Success(t *testing.T) {
 		nil, // suggestionService
 		nil, // dailyActivityService
 		nil, // activityVisualizationService
+		nil, // activityAnalysisService
 	)
 
 	ctx := context.Background()
@@ -520,6 +525,7 @@ func TestHandleWithAI_FallbackToLegacy(t *testing.T) {
 		nil, // suggestionService
 		nil, // dailyActivityService
 		nil, // activityVisualizationService
+		nil, // activityAnalysisService
 	)
 
 	ctx := context.Background()

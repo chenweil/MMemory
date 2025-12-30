@@ -77,7 +77,7 @@ func TestMessageHandler_HandleStartCommand(t *testing.T) {
 	mockContext := new(MockContextManager)
 	mockSuggestion := new(MockSuggestionService)
 
-	handler := NewMessageHandler(mockReminder, mockUser, mockLog, mockAI, nil, mockContext, mockSuggestion, nil, nil)
+	handler := NewMessageHandler(mockReminder, mockUser, mockLog, mockAI, nil, mockContext, mockSuggestion, nil, nil, nil)
 
 	// 期望发送欢迎消息
 	mockBot.On("Send", mock.MatchedBy(func(c tgbotapi.Chattable) bool {
@@ -111,7 +111,7 @@ func TestMessageHandler_HandleHelpCommand(t *testing.T) {
 	mockContext := new(MockContextManager)
 	mockSuggestion := new(MockSuggestionService)
 
-	handler := NewMessageHandler(mockReminder, mockUser, mockLog, mockAI, nil, mockContext, mockSuggestion, nil, nil)
+	handler := NewMessageHandler(mockReminder, mockUser, mockLog, mockAI, nil, mockContext, mockSuggestion, nil, nil, nil)
 
 	mockBot.On("Send", mock.MatchedBy(func(c tgbotapi.Chattable) bool {
 		msg, ok := c.(tgbotapi.MessageConfig)
@@ -144,7 +144,7 @@ func TestMessageHandler_HandleVersionCommand(t *testing.T) {
 	mockContext := new(MockContextManager)
 	mockSuggestion := new(MockSuggestionService)
 
-	handler := NewMessageHandler(mockReminder, mockUser, mockLog, mockAI, nil, mockContext, mockSuggestion, nil, nil)
+	handler := NewMessageHandler(mockReminder, mockUser, mockLog, mockAI, nil, mockContext, mockSuggestion, nil, nil, nil)
 
 	mockBot.On("Send", mock.MatchedBy(func(c tgbotapi.Chattable) bool {
 		msg, ok := c.(tgbotapi.MessageConfig)
@@ -177,7 +177,7 @@ func TestMessageHandler_HandleListCommand_Empty(t *testing.T) {
 	mockContext := new(MockContextManager)
 	mockSuggestion := new(MockSuggestionService)
 
-	handler := NewMessageHandler(mockReminder, mockUser, mockLog, mockAI, nil, mockContext, mockSuggestion, nil, nil)
+	handler := NewMessageHandler(mockReminder, mockUser, mockLog, mockAI, nil, mockContext, mockSuggestion, nil, nil, nil)
 
 	user := &models.User{ID: 1, TelegramID: 123456789}
 
@@ -213,7 +213,7 @@ func TestMessageHandler_HandleListCommand_WithReminders(t *testing.T) {
 	mockContext := new(MockContextManager)
 	mockSuggestion := new(MockSuggestionService)
 
-	handler := NewMessageHandler(mockReminder, mockUser, mockLog, mockAI, nil, mockContext, mockSuggestion, nil, nil)
+	handler := NewMessageHandler(mockReminder, mockUser, mockLog, mockAI, nil, mockContext, mockSuggestion, nil, nil, nil)
 
 	user := &models.User{ID: 1, TelegramID: 123456789}
 	now := time.Now()
@@ -277,7 +277,7 @@ func TestMessageHandler_HandleStatsCommand(t *testing.T) {
 	mockContext := new(MockContextManager)
 	mockSuggestion := new(MockSuggestionService)
 
-	handler := NewMessageHandler(mockReminder, mockUser, mockLog, mockAI, nil, mockContext, mockSuggestion, nil, nil)
+	handler := NewMessageHandler(mockReminder, mockUser, mockLog, mockAI, nil, mockContext, mockSuggestion, nil, nil, nil)
 
 	user := &models.User{ID: 1, TelegramID: 123456789}
 
@@ -323,7 +323,7 @@ func TestMessageHandler_HandleDeleteCommand(t *testing.T) {
 	mockContext := new(MockContextManager)
 	mockSuggestion := new(MockSuggestionService)
 
-	handler := NewMessageHandler(mockReminder, mockUser, mockLog, mockAI, nil, mockContext, mockSuggestion, nil, nil)
+	handler := NewMessageHandler(mockReminder, mockUser, mockLog, mockAI, nil, mockContext, mockSuggestion, nil, nil, nil)
 
 	user := &models.User{ID: 1, TelegramID: 123456789}
 	reminder := &models.Reminder{
@@ -399,7 +399,7 @@ func TestMessageHandler_HandleDeleteCommand_InvalidID(t *testing.T) {
 	mockContext := new(MockContextManager)
 	mockSuggestion := new(MockSuggestionService)
 
-	handler := NewMessageHandler(mockReminder, mockUser, mockLog, mockAI, nil, mockContext, mockSuggestion, nil, nil)
+	handler := NewMessageHandler(mockReminder, mockUser, mockLog, mockAI, nil, mockContext, mockSuggestion, nil, nil, nil)
 
 	user := &models.User{ID: 1, TelegramID: 123456789}
 
@@ -433,7 +433,7 @@ func TestMessageHandler_HandleDeleteCommand_NotFound(t *testing.T) {
 	mockContext := new(MockContextManager)
 	mockSuggestion := new(MockSuggestionService)
 
-	handler := NewMessageHandler(mockReminder, mockUser, mockLog, mockAI, nil, mockContext, mockSuggestion, nil, nil)
+	handler := NewMessageHandler(mockReminder, mockUser, mockLog, mockAI, nil, mockContext, mockSuggestion, nil, nil, nil)
 
 	user := &models.User{ID: 1, TelegramID: 123456789}
 
@@ -470,7 +470,7 @@ func TestMessageHandler_HandleDeleteCommand_NoArgs(t *testing.T) {
 	mockContext := new(MockContextManager)
 	mockSuggestion := new(MockSuggestionService)
 
-	handler := NewMessageHandler(mockReminder, mockUser, mockLog, mockAI, nil, mockContext, mockSuggestion, nil, nil)
+	handler := NewMessageHandler(mockReminder, mockUser, mockLog, mockAI, nil, mockContext, mockSuggestion, nil, nil, nil)
 
 	mockBot.On("Send", mock.MatchedBy(func(c tgbotapi.Chattable) bool {
 		msg, ok := c.(tgbotapi.MessageConfig)
@@ -502,7 +502,7 @@ func TestMessageHandler_handleReminderIntent(t *testing.T) {
 	mockContext := new(MockContextManager)
 	mockSuggestion := new(MockSuggestionService)
 
-	handler := NewMessageHandler(mockReminder, mockUser, mockLog, mockAI, nil, mockContext, mockSuggestion, nil, nil)
+	handler := NewMessageHandler(mockReminder, mockUser, mockLog, mockAI, nil, mockContext, mockSuggestion, nil, nil, nil)
 
 	user := &models.User{ID: 1, TelegramID: 123456789}
 
@@ -556,7 +556,7 @@ func TestMessageHandler_handleDeleteIntent_SingleMatch(t *testing.T) {
 	mockContext := new(MockContextManager)
 	mockSuggestion := new(MockSuggestionService)
 
-	handler := NewMessageHandler(mockReminder, mockUser, mockLog, mockAI, nil, mockContext, mockSuggestion, nil, nil)
+	handler := NewMessageHandler(mockReminder, mockUser, mockLog, mockAI, nil, mockContext, mockSuggestion, nil, nil, nil)
 
 	user := &models.User{ID: 1, TelegramID: 123456789}
 
@@ -610,7 +610,7 @@ func TestMessageHandler_handleDeleteIntent_MultipleMatches(t *testing.T) {
 	mockContext := new(MockContextManager)
 	mockSuggestion := new(MockSuggestionService)
 
-	handler := NewMessageHandler(mockReminder, mockUser, mockLog, mockAI, nil, mockContext, mockSuggestion, nil, nil)
+	handler := NewMessageHandler(mockReminder, mockUser, mockLog, mockAI, nil, mockContext, mockSuggestion, nil, nil, nil)
 
 	user := &models.User{ID: 1, TelegramID: 123456789}
 
@@ -659,7 +659,7 @@ func TestMessageHandler_handleDeleteIntent_NoMatches(t *testing.T) {
 	mockContext := new(MockContextManager)
 	mockSuggestion := new(MockSuggestionService)
 
-	handler := NewMessageHandler(mockReminder, mockUser, mockLog, mockAI, nil, mockContext, mockSuggestion, nil, nil)
+	handler := NewMessageHandler(mockReminder, mockUser, mockLog, mockAI, nil, mockContext, mockSuggestion, nil, nil, nil)
 
 	user := &models.User{ID: 1, TelegramID: 123456789}
 
@@ -703,7 +703,7 @@ func TestMessageHandler_handlePauseIntent(t *testing.T) {
 	mockContext := new(MockContextManager)
 	mockSuggestion := new(MockSuggestionService)
 
-	handler := NewMessageHandler(mockReminder, mockUser, mockLog, mockAI, nil, mockContext, mockSuggestion, nil, nil)
+	handler := NewMessageHandler(mockReminder, mockUser, mockLog, mockAI, nil, mockContext, mockSuggestion, nil, nil, nil)
 
 	user := &models.User{ID: 1, TelegramID: 123456789}
 
@@ -760,7 +760,7 @@ func TestMessageHandler_handleResumeIntent(t *testing.T) {
 	mockContext := new(MockContextManager)
 	mockSuggestion := new(MockSuggestionService)
 
-	handler := NewMessageHandler(mockReminder, mockUser, mockLog, mockAI, nil, mockContext, mockSuggestion, nil, nil)
+	handler := NewMessageHandler(mockReminder, mockUser, mockLog, mockAI, nil, mockContext, mockSuggestion, nil, nil, nil)
 
 	user := &models.User{ID: 1, TelegramID: 123456789}
 
@@ -815,7 +815,7 @@ func TestMessageHandler_handleChatIntent(t *testing.T) {
 	mockContext := new(MockContextManager)
 	mockSuggestion := new(MockSuggestionService)
 
-	handler := NewMessageHandler(mockReminder, mockUser, mockLog, mockAI, nil, mockContext, mockSuggestion, nil, nil)
+	handler := NewMessageHandler(mockReminder, mockUser, mockLog, mockAI, nil, mockContext, mockSuggestion, nil, nil, nil)
 
 	user := &models.User{ID: 1, TelegramID: 123456789}
 
@@ -860,7 +860,7 @@ func TestMessageHandler_handleSuggestionRequest(t *testing.T) {
 	mockContext := new(MockContextManager)
 	mockSuggestion := new(MockSuggestionService)
 
-	handler := NewMessageHandler(mockReminder, mockUser, mockLog, mockAI, nil, mockContext, mockSuggestion, nil, nil)
+	handler := NewMessageHandler(mockReminder, mockUser, mockLog, mockAI, nil, mockContext, mockSuggestion, nil, nil, nil)
 
 	user := &models.User{ID: 1, TelegramID: 123456789}
 
@@ -906,7 +906,7 @@ func TestMessageHandler_handleSummaryIntent(t *testing.T) {
 	mockContext := new(MockContextManager)
 	mockSuggestion := new(MockSuggestionService)
 
-	handler := NewMessageHandler(mockReminder, mockUser, mockLog, mockAI, nil, mockContext, mockSuggestion, nil, nil)
+	handler := NewMessageHandler(mockReminder, mockUser, mockLog, mockAI, nil, mockContext, mockSuggestion, nil, nil, nil)
 
 	user := &models.User{ID: 1, TelegramID: 123456789}
 
@@ -958,7 +958,7 @@ func TestMessageHandler_handleQueryIntent(t *testing.T) {
 	mockContext := new(MockContextManager)
 	mockSuggestion := new(MockSuggestionService)
 
-	handler := NewMessageHandler(mockReminder, mockUser, mockLog, mockAI, nil, mockContext, mockSuggestion, nil, nil)
+	handler := NewMessageHandler(mockReminder, mockUser, mockLog, mockAI, nil, mockContext, mockSuggestion, nil, nil, nil)
 
 	user := &models.User{ID: 1, TelegramID: 123456789}
 
@@ -1004,7 +1004,7 @@ func TestMessageHandler_handleWithLegacyParser(t *testing.T) {
 	mockContext := new(MockContextManager)
 	mockSuggestion := new(MockSuggestionService)
 
-	handler := NewMessageHandler(mockReminder, mockUser, mockLog, mockAI, nil, mockContext, mockSuggestion, nil, nil)
+	handler := NewMessageHandler(mockReminder, mockUser, mockLog, mockAI, nil, mockContext, mockSuggestion, nil, nil, nil)
 
 	user := &models.User{ID: 1, TelegramID: 123456789}
 	reminder := &models.Reminder{
@@ -1050,7 +1050,7 @@ func TestMessageHandler_sendEditGuidance(t *testing.T) {
 	mockContext := new(MockContextManager)
 	mockSuggestion := new(MockSuggestionService)
 
-	handler := NewMessageHandler(mockReminder, mockUser, mockLog, mockAI, nil, mockContext, mockSuggestion, nil, nil)
+	handler := NewMessageHandler(mockReminder, mockUser, mockLog, mockAI, nil, mockContext, mockSuggestion, nil, nil, nil)
 
 	reminders := []*models.Reminder{
 		{ID: 1, Title: "健身提醒", TargetTime: "19:00:00"},
@@ -1079,7 +1079,7 @@ func TestMessageHandler_formatConversationHistory(t *testing.T) {
 	mockContext := new(MockContextManager)
 	mockSuggestion := new(MockSuggestionService)
 
-	handler := NewMessageHandler(mockReminder, mockUser, mockLog, mockAI, nil, mockContext, mockSuggestion, nil, nil)
+	handler := NewMessageHandler(mockReminder, mockUser, mockLog, mockAI, nil, mockContext, mockSuggestion, nil, nil, nil)
 
 	messages := []models.ConversationMessage{
 		{Role: "user", Content: "每天提醒我健身"},
@@ -1103,7 +1103,7 @@ func TestMessageHandler_formatConversationHistory_Empty(t *testing.T) {
 	mockContext := new(MockContextManager)
 	mockSuggestion := new(MockSuggestionService)
 
-	handler := NewMessageHandler(mockReminder, mockUser, mockLog, mockAI, nil, mockContext, mockSuggestion, nil, nil)
+	handler := NewMessageHandler(mockReminder, mockUser, mockLog, mockAI, nil, mockContext, mockSuggestion, nil, nil, nil)
 
 	result := handler.formatConversationHistory(nil)
 	assert.Equal(t, "", result)
