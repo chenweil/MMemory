@@ -39,3 +39,5 @@ coverage.html
 # 忽略 Claude IDE 配置文件
 .claude/
 *.bak
+.claude/settings.local.json
+.iflow/agents/golang-pro.md
