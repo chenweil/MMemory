@@ -9,6 +9,7 @@ import (
 
 	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api/v5"
 
+	"mmemory/internal/models"
 	botinterface "mmemory/internal/bot"
 	"mmemory/internal/service"
 	"mmemory/pkg/logger"
@@ -329,6 +330,214 @@ func (h *CallbackHandler) handleReminderEdit(ctx context.Context, bot botinterfa
 	}
 
 	return h.sendCallbackResponse(bot, callback.ID, "📝 请通过文字描述你的修改")
+}
+
+// handleEditField 处理字段编辑选择
+func (h *CallbackHandler) handleEditField(ctx context.Context, bot botinterface.BotAPI, callback *tgbotapi.CallbackQuery, reminderID uint, field string) error {
+	reminder, err := h.reminderService.GetReminderByID(ctx, reminderID)
+	if err != nil {
+		logger.Errorf("获取提醒失败 (ID: %d): %v", reminderID, err)
+		return h.sendCallbackResponse(bot, callback.ID, "❌ 获取提醒失败")
+	}
+	if reminder == nil {
+		return h.sendCallbackResponse(bot, callback.ID, "❌ 提醒不存在")
+	}
+
+	switch field {
+	case "title":
+		return h.handleEditTitle(ctx, bot, callback, reminder)
+	case "time":
+		return h.handleEditTimeSelection(ctx, bot, callback, reminder)
+	case "pattern":
+		return h.handleEditPatternSelection(ctx, bot, callback, reminder)
+	case "description":
+		return h.handleEditDescription(ctx, bot, callback, reminder)
+	case "natural":
+		return h.handleNaturalLanguageEdit(ctx, bot, callback, reminder)
+	default:
+		return h.sendCallbackResponse(bot, callback.ID, "❌ 未知的编辑字段")
+	}
+}
+
+// handleEditTitle 处理标题编辑
+func (h *CallbackHandler) handleEditTitle(ctx context.Context, bot botinterface.BotAPI, callback *tgbotapi.CallbackQuery, reminder *models.Reminder) error {
+	text := fmt.Sprintf(`📝 <b>修改标题</b>
+
+当前标题：<b>%s</b>
+
+请直接发送新的标题：`, reminder.Title)
+
+	if callback.Message != nil {
+		msg := tgbotapi.NewMessage(callback.Message.Chat.ID, text)
+		msg.ParseMode = tgbotapi.ModeHTML
+		if _, err := bot.Send(msg); err != nil {
+			logger.Warnf("发送标题编辑提示失败: %v", err)
+		}
+	}
+
+	return h.sendCallbackResponse(bot, callback.ID, "📝 请发送新的标题")
+}
+
+// handleEditTimeSelection 处理时间选择
+func (h *CallbackHandler) handleEditTimeSelection(ctx context.Context, bot botinterface.BotAPI, callback *tgbotapi.CallbackQuery, reminder *models.Reminder) error {
+	text := fmt.Sprintf(`⏰ <b>修改时间</b>
+
+当前时间：<b>%s</b>
+
+请选择新的时间：`, reminder.TargetTime[:5])
+
+	keyboard := tgbotapi.NewInlineKeyboardMarkup(
+		tgbotapi.NewInlineKeyboardRow(
+			tgbotapi.NewInlineKeyboardButtonData("06:00", fmt.Sprintf("reminder_edit_time_%d_06:00:00", reminder.ID)),
+			tgbotapi.NewInlineKeyboardButtonData("07:00", fmt.Sprintf("reminder_edit_time_%d_07:00:00", reminder.ID)),
+			tgbotapi.NewInlineKeyboardButtonData("08:00", fmt.Sprintf("reminder_edit_time_%d_08:00:00", reminder.ID)),
+		),
+		tgbotapi.NewInlineKeyboardRow(
+			tgbotapi.NewInlineKeyboardButtonData("09:00", fmt.Sprintf("reminder_edit_time_%d_09:00:00", reminder.ID)),
+			tgbotapi.NewInlineKeyboardButtonData("10:00", fmt.Sprintf("reminder_edit_time_%d_10:00:00", reminder.ID)),
+			tgbotapi.NewInlineKeyboardButtonData("11:00", fmt.Sprintf("reminder_edit_time_%d_11:00:00", reminder.ID)),
+		),
+		tgbotapi.NewInlineKeyboardRow(
+			tgbotapi.NewInlineKeyboardButtonData("12:00", fmt.Sprintf("reminder_edit_time_%d_12:00:00", reminder.ID)),
+			tgbotapi.NewInlineKeyboardButtonData("18:00", fmt.Sprintf("reminder_edit_time_%d_18:00:00", reminder.ID)),
+			tgbotapi.NewInlineKeyboardButtonData("21:00", fmt.Sprintf("reminder_edit_time_%d_21:00:00", reminder.ID)),
+		),
+	)
+
+	if callback.Message != nil {
+		msg := tgbotapi.NewMessage(callback.Message.Chat.ID, text)
+		msg.ParseMode = tgbotapi.ModeHTML
+		msg.ReplyMarkup = keyboard
+		if _, err := bot.Send(msg); err != nil {
+			logger.Warnf("发送时间选择键盘失败: %v", err)
+		}
+	}
+
+	return h.sendCallbackResponse(bot, callback.ID, "⏰ 请选择新的时间")
+}
+
+// handleEditPatternSelection 处理模式选择
+func (h *CallbackHandler) handleEditPatternSelection(ctx context.Context, bot botinterface.BotAPI, callback *tgbotapi.CallbackQuery, reminder *models.Reminder) error {
+	text := fmt.Sprintf(`🔄 <b>修改重复模式</b>
+
+当前模式：<b>%s</b>
+
+请选择新的模式：`, reminder.SchedulePattern)
+
+	keyboard := tgbotapi.NewInlineKeyboardMarkup(
+		tgbotapi.NewInlineKeyboardRow(
+			tgbotapi.NewInlineKeyboardButtonData("每天", fmt.Sprintf("reminder_edit_pattern_%d_daily", reminder.ID)),
+			tgbotapi.NewInlineKeyboardButtonData("工作日", fmt.Sprintf("reminder_edit_pattern_%d_weekday", reminder.ID)),
+		),
+		tgbotapi.NewInlineKeyboardRow(
+			tgbotapi.NewInlineKeyboardButtonData("周末", fmt.Sprintf("reminder_edit_pattern_%d_weekend", reminder.ID)),
+			tgbotapi.NewInlineKeyboardButtonData("每周", fmt.Sprintf("reminder_edit_pattern_%d_weekly", reminder.ID)),
+		),
+	)
+
+	if callback.Message != nil {
+		msg := tgbotapi.NewMessage(callback.Message.Chat.ID, text)
+		msg.ParseMode = tgbotapi.ModeHTML
+		msg.ReplyMarkup = keyboard
+		if _, err := bot.Send(msg); err != nil {
+			logger.Warnf("发送模式选择键盘失败: %v", err)
+		}
+	}
+
+	return h.sendCallbackResponse(bot, callback.ID, "🔄 请选择新的模式")
+}
+
+// handleEditDescription 处理描述编辑
+func (h *CallbackHandler) handleEditDescription(ctx context.Context, bot botinterface.BotAPI, callback *tgbotapi.CallbackQuery, reminder *models.Reminder) error {
+	text := fmt.Sprintf(`📋 <b>修改描述</b>
+
+当前描述：<b>%s</b>
+
+请直接发送新的描述：`, reminder.Description)
+
+	if callback.Message != nil {
+		msg := tgbotapi.NewMessage(callback.Message.Chat.ID, text)
+		msg.ParseMode = tgbotapi.ModeHTML
+		if _, err := bot.Send(msg); err != nil {
+			logger.Warnf("发送描述编辑提示失败: %v", err)
+		}
+	}
+
+	return h.sendCallbackResponse(bot, callback.ID, "📋 请发送新的描述")
+}
+
+// handleNaturalLanguageEdit 处理自然语言编辑
+func (h *CallbackHandler) handleNaturalLanguageEdit(ctx context.Context, bot botinterface.BotAPI, callback *tgbotapi.CallbackQuery, reminder *models.Reminder) error {
+	text := fmt.Sprintf(`💬 <b>自然语言编辑</b>
+
+当前提醒：%s (%s)
+
+你可以直接对我说：
+• "把提醒改成每天早上8点"
+• "把提醒时间改成下午3点"
+• "把提醒改成每周一三五"
+
+💡 AI会智能理解你的修改意图`, reminder.Title, reminder.TargetTime[:5])
+
+	if callback.Message != nil {
+		msg := tgbotapi.NewMessage(callback.Message.Chat.ID, text)
+		msg.ParseMode = tgbotapi.ModeHTML
+		if _, err := bot.Send(msg); err != nil {
+			logger.Warnf("发送自然语言编辑提示失败: %v", err)
+		}
+	}
+
+	return h.sendCallbackResponse(bot, callback.ID, "💬 请描述你的修改需求")
+}
+
+// handleEditTime 处理时间编辑
+func (h *CallbackHandler) handleEditTime(ctx context.Context, bot botinterface.BotAPI, callback *tgbotapi.CallbackQuery, reminderID uint, newTime string) error {
+	if len(newTime) != 8 {
+		return h.sendCallbackResponse(bot, callback.ID, "❌ 无效的时间格式")
+	}
+
+	params := service.EditReminderParams{
+		ReminderID: reminderID,
+		NewTime:    &newTime,
+	}
+
+	if err := h.reminderService.EditReminder(ctx, params); err != nil {
+		logger.Errorf("编辑提醒时间失败 (ID: %d): %v", reminderID, err)
+		return h.sendCallbackResponse(bot, callback.ID, "❌ 编辑失败，请稍后重试")
+	}
+
+	reminder, _ := h.reminderService.GetReminderByID(ctx, reminderID)
+	if reminder != nil && callback.Message != nil {
+		msg := tgbotapi.NewMessage(callback.Message.Chat.ID, fmt.Sprintf("✅ 时间已修改为 %s", newTime[:5]))
+		if _, err := bot.Send(msg); err != nil {
+			logger.Warnf("发送时间修改确认失败: %v", err)
+		}
+	}
+
+	return h.sendCallbackResponse(bot, callback.ID, fmt.Sprintf("✅ 时间已修改为 %s", newTime[:5]))
+}
+
+// handleEditPattern 处理模式编辑
+func (h *CallbackHandler) handleEditPattern(ctx context.Context, bot botinterface.BotAPI, callback *tgbotapi.CallbackQuery, reminderID uint, newPattern string) error {
+	params := service.EditReminderParams{
+		ReminderID: reminderID,
+		NewPattern: &newPattern,
+	}
+
+	if err := h.reminderService.EditReminder(ctx, params); err != nil {
+		logger.Errorf("编辑提醒模式失败 (ID: %d): %v", reminderID, err)
+		return h.sendCallbackResponse(bot, callback.ID, "❌ 编辑失败，请稍后重试")
+	}
+
+	reminder, _ := h.reminderService.GetReminderByID(ctx, reminderID)
+	if reminder != nil && callback.Message != nil {
+		msg := tgbotapi.NewMessage(callback.Message.Chat.ID, fmt.Sprintf("✅ 重复模式已修改为 %s", newPattern))
+		if _, err := bot.Send(msg); err != nil {
+			logger.Warnf("发送模式修改确认失败: %v", err)
+		}
+	}
+
+	return h.sendCallbackResponse(bot, callback.ID, fmt.Sprintf("✅ 重复模式已修改为 %s", newPattern))
 }
 
 func (h *CallbackHandler) sendCallbackResponse(bot botinterface.BotAPI, callbackID, text string) error {
