@@ -31,6 +31,9 @@ type MessageHandler struct {
 
 	// 活动记录服务
 	dailyActivityService service.DailyActivityService
+
+	// 活动可视化服务
+	activityVisualizationService service.ActivityVisualizationService
 }
 
 type conversationContextKey struct{}
@@ -61,16 +64,18 @@ func NewMessageHandler(
 	contextManager service.ContextManagerService,
 	suggestionService service.ReminderSuggestionService,
 	dailyActivityService service.DailyActivityService,
+	activityVisualizationService service.ActivityVisualizationService,
 ) *MessageHandler {
 	return &MessageHandler{
-		reminderService:      reminderService,
-		userService:          userService,
-		reminderLogService:   reminderLogService,
-		aiParserService:      aiParserService,
-		conversationService:  conversationService,
-		contextManager:       contextManager,
-		suggestionService:    suggestionService,
-		dailyActivityService: dailyActivityService,
+		reminderService:                reminderService,
+		userService:                    userService,
+		reminderLogService:             reminderLogService,
+		aiParserService:                aiParserService,
+		conversationService:            conversationService,
+		contextManager:                 contextManager,
+		suggestionService:              suggestionService,
+		dailyActivityService:           dailyActivityService,
+		activityVisualizationService:   activityVisualizationService,
 	}
 }
 
@@ -398,6 +403,8 @@ func (h *MessageHandler) handleWithAI(ctx context.Context, bot botinterface.BotA
 		return h.handleRecordActivityIntent(ctx, bot, message, user, parseResult)
 	case ai.IntentQueryActivity:
 		return h.handleQueryActivityIntent(ctx, bot, message, user, parseResult)
+	case ai.IntentActivityVisualize:
+		return h.handleActivityVisualizeIntent(ctx, bot, message, user, parseResult)
 	case ai.IntentChat:
 		return h.handleChatIntent(ctx, bot, message, user, parseResult)
 	case ai.IntentSummary:
@@ -782,6 +789,131 @@ func (h *MessageHandler) handleQueryActivityIntent(ctx context.Context, bot boti
 	}
 
 	return h.sendMessage(bot, message.Chat.ID, response)
+}
+
+// handleActivityVisualizeIntent 处理活动可视化意图
+func (h *MessageHandler) handleActivityVisualizeIntent(ctx context.Context, bot botinterface.BotAPI, message *tgbotapi.Message, user *models.User, parseResult *ai.ParseResult) error {
+	if h.activityVisualizationService == nil {
+		return h.sendMessage(bot, message.Chat.ID, "活动可视化功能暂未启用")
+	}
+
+	if parseResult.ActivityVisualize == nil {
+		return h.sendMessage(bot, message.Chat.ID, "无法识别可视化请求")
+	}
+
+	vizInfo := parseResult.ActivityVisualize
+
+	// 确定时间范围
+	timeRange := vizInfo.TimeRange
+	if timeRange == "" {
+		timeRange = "最近7天"
+	}
+
+	// 确定活动类型
+	activityType := vizInfo.ActivityType
+	if activityType == "" {
+		activityType = "all"
+	}
+
+	// 确定天数
+	days := vizInfo.Days
+	if days <= 0 {
+		days = 7
+	}
+
+	var response string
+	var err error
+
+	switch vizInfo.VisualizeType {
+	case "trend":
+		// 趋势图表
+		response, err = h.activityVisualizationService.GetActivityTrendChart(ctx, user.ID, activityType, days)
+		if err == nil {
+			response = "📈 <b>活动趋势</b>\n\n" + response
+		}
+
+	case "heatmap":
+		// 热力图
+		response, err = h.activityVisualizationService.GetActivityHeatmap(ctx, user.ID, activityType, days)
+		if err == nil {
+			response = "🌡️ <b>活动热力图</b>\n\n" + response
+		}
+
+	case "statistics":
+		// 统计数据
+		stats, err := h.activityVisualizationService.GetActivityStatistics(ctx, user.ID, timeRange)
+		if err != nil {
+			return h.sendErrorMessage(bot, message.Chat.ID, "获取统计数据失败，请稍后重试")
+		}
+		response = h.formatActivityStatistics(stats, timeRange)
+
+	case "completion":
+		// 完成率
+		completion, err := h.activityVisualizationService.GetCompletionRate(ctx, user.ID, activityType, days)
+		if err != nil {
+			return h.sendErrorMessage(bot, message.Chat.ID, "获取完成率失败，请稍后重试")
+		}
+		response = h.formatCompletionRate(completion, activityType)
+
+	case "summary", "":
+		// 综合摘要
+		response, err = h.activityVisualizationService.GetActivitySummary(ctx, user.ID, timeRange)
+		if err != nil {
+			return h.sendErrorMessage(bot, message.Chat.ID, "获取活动摘要失败，请稍后重试")
+		}
+
+	default:
+		return h.sendMessage(bot, message.Chat.ID, fmt.Sprintf("不支持的可视化类型: %s", vizInfo.VisualizeType))
+	}
+
+	if err != nil {
+		logger.Errorf("生成可视化失败: %v", err)
+		return h.sendErrorMessage(bot, message.Chat.ID, "生成可视化失败，请稍后重试")
+	}
+
+	return h.sendMessage(bot, message.Chat.ID, response)
+}
+
+// formatActivityStatistics 格式化活动统计数据
+func (h *MessageHandler) formatActivityStatistics(stats *service.ActivityStatistics, timeRange string) string {
+	result := fmt.Sprintf("📊 <b>活动统计 - %s</b>\n\n", timeRange)
+	result += fmt.Sprintf("📈 总活动次数: %d 次\n", stats.TotalActivities)
+	result += fmt.Sprintf("📅 日均活动: %.1f 次\n", stats.DailyAverage)
+
+	if stats.MostActiveDay != "" {
+		result += fmt.Sprintf("🔥 最活跃日: %s\n", service.FormatDate(stats.MostActiveDay))
+	}
+
+	result += "\n🏷️ <b>类型分布</b>\n"
+	for actType, count := range stats.ByType {
+		if count > 0 {
+			displayName := getActivityTypeDisplayName(models.ActivityType(actType))
+			percentage := float64(count) * 100 / float64(stats.TotalActivities)
+			result += fmt.Sprintf("  %s: %d 次 (%.1f%%)\n", displayName, count, percentage)
+		}
+	}
+
+	result += fmt.Sprintf("\n📊 趋势: %s\n", service.FormatTrend(stats.Trend))
+
+	return result
+}
+
+// formatCompletionRate 格式化完成率
+func (h *MessageHandler) formatCompletionRate(completion *service.CompletionRate, activityType string) string {
+	displayType := activityType
+	if activityType == "all" || activityType == "" {
+		displayType = "全部活动"
+	} else {
+		displayType = getActivityTypeDisplayName(models.ActivityType(activityType))
+	}
+
+	result := fmt.Sprintf("📊 <b>%s 完成率</b>\n\n", displayType)
+	result += fmt.Sprintf("📝 总记录: %d 条\n", completion.TotalRecords)
+	result += fmt.Sprintf("✅ 已完成: %d 条\n", completion.CompletedRecords)
+	result += fmt.Sprintf("🎯 完成率: %.1f%%\n", completion.Rate*100)
+	result += fmt.Sprintf("\n📈 趋势: %s\n", service.FormatTrend(completion.Trend))
+
+	return result
 }
 
 // getActivityTypeDisplayName 获取活动类型的显示名称

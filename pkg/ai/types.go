@@ -11,19 +11,20 @@ import (
 type ParseIntent string
 
 const (
-	IntentReminder        ParseIntent = "reminder"          // 创建提醒
-	IntentDelete          ParseIntent = "delete"            // 删除提醒
-	IntentEdit            ParseIntent = "edit"              // 编辑提醒
-	IntentPause           ParseIntent = "pause"             // 暂停提醒
-	IntentResume          ParseIntent = "resume"            // 恢复提醒
-	IntentChat            ParseIntent = "chat"              // 普通对话
-	IntentSummary         ParseIntent = "summary"           // 总结请求
-	IntentQuery           ParseIntent = "query"             // 查询提醒
-	IntentWeather         ParseIntent = "weather"           // 天气查询
-	IntentRecordActivity  ParseIntent = "record_activity"   // 记录活动
-	IntentQueryActivity   ParseIntent = "query_activity"    // 查询活动
-	IntentActivitySummary ParseIntent = "activity_summary"  // 活动统计
-	IntentUnknown         ParseIntent = "unknown"           // 未知意图
+	IntentReminder          ParseIntent = "reminder"            // 创建提醒
+	IntentDelete            ParseIntent = "delete"              // 删除提醒
+	IntentEdit              ParseIntent = "edit"                // 编辑提醒
+	IntentPause             ParseIntent = "pause"               // 暂停提醒
+	IntentResume            ParseIntent = "resume"              // 恢复提醒
+	IntentChat              ParseIntent = "chat"                // 普通对话
+	IntentSummary           ParseIntent = "summary"             // 总结请求
+	IntentQuery             ParseIntent = "query"               // 查询提醒
+	IntentWeather           ParseIntent = "weather"             // 天气查询
+	IntentRecordActivity    ParseIntent = "record_activity"     // 记录活动
+	IntentQueryActivity     ParseIntent = "query_activity"      // 查询活动
+	IntentActivitySummary   ParseIntent = "activity_summary"    // 活动统计
+	IntentActivityVisualize ParseIntent = "activity_visualize"  // 活动可视化
+	IntentUnknown           ParseIntent = "unknown"             // 未知意图
 )
 
 // IsValid 检查意图是否有效
@@ -41,6 +42,7 @@ func (i ParseIntent) IsValid() bool {
 		IntentRecordActivity,
 		IntentQueryActivity,
 		IntentActivitySummary,
+		IntentActivityVisualize,
 		IntentUnknown:
 		return true
 	default:
@@ -82,6 +84,9 @@ type ParseResult struct {
 
 	// 活动查询相关（当Intent为query_activity时）
 	QueryActivity *ActivityQueryInfo `json:"query_activity,omitempty"`
+
+	// 活动可视化相关（当Intent为activity_visualize时）
+	ActivityVisualize *ActivityVisualizeInfo `json:"activity_visualize,omitempty"`
 
 	// 对话相关（当Intent为chat时）
 	ChatResponse *ChatInfo `json:"chat_response,omitempty"`
@@ -163,6 +168,14 @@ type ActivityQueryInfo struct {
 	QueryType    string `json:"query_type"`              // "by_type", "by_time", "statistics"
 	ActivityType string `json:"activity_type,omitempty"` // 活动类型
 	TimeRange    string `json:"time_range,omitempty"`    // "今天", "昨天", "最近7天", "这周"
+}
+
+// ActivityVisualizeInfo 活动可视化信息
+type ActivityVisualizeInfo struct {
+	VisualizeType string `json:"visualize_type"`         // "trend", "heatmap", "statistics", "summary", "completion"
+	ActivityType  string `json:"activity_type,omitempty"` // 活动类型，如 "drink_water", "exercise"
+	TimeRange     string `json:"time_range,omitempty"`    // "今天", "昨天", "最近7天", "这周", "最近30天"
+	Days          int    `json:"days,omitempty"`          // 自定义天数
 }
 
 // ChatResponse 对话响应（用于Chat接口）

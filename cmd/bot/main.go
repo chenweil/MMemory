@@ -101,6 +101,9 @@ func main() {
 		service.SuggestionServiceConfig{},
 	)
 
+	// 初始化活动可视化服务
+	activityVisualizationService := service.NewActivityVisualizationService(dailyActivityRepo)
+
 	// 初始化AI服务（如果启用）
 	var aiParserService service.AIParserService
 	if cfg.AI.Enabled {
@@ -196,7 +199,7 @@ func main() {
 	}
 
 	// 初始化消息处理器
-	messageHandler := handlers.NewMessageHandler(reminderService, userService, reminderLogService, aiParserService, conversationService, contextManager, suggestionService, dailyActivityService)
+	messageHandler := handlers.NewMessageHandler(reminderService, userService, reminderLogService, aiParserService, conversationService, contextManager, suggestionService, dailyActivityService, activityVisualizationService)
 	callbackHandler := handlers.NewCallbackHandler(reminderService, reminderLogService, schedulerService)
 
 	// 启动调度器

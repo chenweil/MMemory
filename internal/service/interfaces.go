@@ -110,3 +110,49 @@ type PatternDetectorService interface {
 	AnalyzeUserBehavior(ctx context.Context, userID uint) ([]DetectedPattern, error)
 	GetPatternSuggestions(ctx context.Context, userID uint) ([]ReminderSuggestion, error)
 }
+
+// ActivityVisualizationService 活动可视化服务接口
+type ActivityVisualizationService interface {
+	// GetActivityTrendChart 获取活动趋势图表（ASCII）
+	GetActivityTrendChart(ctx context.Context, userID uint, activityType string, days int) (string, error)
+
+	// GetActivityHeatmap 获取活动热力图
+	GetActivityHeatmap(ctx context.Context, userID uint, activityType string, days int) (string, error)
+
+	// GetActivityStatistics 获取活动统计数据
+	GetActivityStatistics(ctx context.Context, userID uint, timeRange string) (*ActivityStatistics, error)
+
+	// GetCompletionRate 获取活动完成率
+	GetCompletionRate(ctx context.Context, userID uint, activityType string, days int) (*CompletionRate, error)
+
+	// GetActivitySummary 获取活动综合摘要
+	GetActivitySummary(ctx context.Context, userID uint, timeRange string) (string, error)
+}
+
+// ActivityStatistics 活动统计数据
+type ActivityStatistics struct {
+	TotalActivities     int64            `json:"total_activities"`
+	ByType              map[string]int64 `json:"by_type"`
+	ByDay               map[string]int64 `json:"by_day"` // 按天统计 "2024-01-01": 5
+	MostActiveDay       string           `json:"most_active_day"`
+	MostActiveType      string           `json:"most_active_type"`
+	DailyAverage        float64          `json:"daily_average"`
+	Trend               string           `json:"trend"` // "up", "down", "stable"
+	WeeklyData          []DailyData      `json:"weekly_data"`
+}
+
+// DailyData 每日数据
+type DailyData struct {
+	Date       string            `json:"date"`
+	Total      int64             `json:"total"`
+	ByType     map[string]int64  `json:"by_type"`
+}
+
+// CompletionRate 活动完成率
+type CompletionRate struct {
+	ActivityType    string  `json:"activity_type"`
+	TotalRecords    int64   `json:"total_records"`
+	CompletedRecords int64  `json:"completed_records"`
+	Rate            float64 `json:"rate"` // 0.0 - 1.0
+	Trend           string  `json:"trend"`
+}
