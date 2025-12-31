@@ -265,7 +265,7 @@ type ConversationContext struct {
     Locale       string     `gorm:"size:10"`
     MessagesJSON string     `gorm:"type:text;not null"`
     EntitiesJSON string     `gorm:"type:text"`
-    TTLSeconds   int64      `gorm:"not null;default:0`
+    TTLSeconds   int64      `gorm:"not null;default:0"`
     LastActivity time.Time  `gorm:"not null"`
     CreatedAt    time.Time
     UpdatedAt    time.Time
