@@ -141,17 +141,22 @@ The codebase follows a layered architecture pattern with clean separation of con
 - **Server Layer** (`pkg/server/`): HTTP server for health checks and metrics
 
 ### Key Services
-- **IntelligentAIManager**: Multi-provider AI management with intelligent selection and cost control
+- **ReminderService**: Core business logic for creating, managing, and tracking reminders
+- **SchedulerService**: Cron-based job scheduling with persistence and recovery
+- **NotificationService**: Telegram message sending and intelligent user interaction handling
 - **AIParserService**: Multi-AI natural language understanding with C3 intelligent degradation
+- **IntelligentAIManager**: Multi-provider AI management with intelligent selection and cost control
 - **ContextManager**: Intelligent conversation context management and user behavior analysis
 - **ConversationService**: 30-day conversation history with enhanced context awareness
 - **SuggestionService**: AI-powered reminder optimization and behavioral suggestions
 - **WeatherService**: Location-aware weather integration and conditional triggers
-- **ReminderService**: Core business logic for creating, managing, and tracking reminders
-- **SchedulerService**: Cron-based job scheduling with persistence and recovery
-- **NotificationService**: Telegram message sending and intelligent user interaction handling
+- **DailyActivityService**: User activity tracking (drinking water, reading, exercise, etc.)
+- **ActivityAnalysisService**: Pattern detection and habit formation analysis
+- **ActivityVisualizationService**: ASCII charts and activity statistics
+- **PatternDetectorService**: User behavior pattern recognition
+- **ConditionEvaluatorService**: Conditional trigger evaluation engine
+- **CostMonitorService**: AI usage cost tracking and budget management
 - **MonitoringService**: Advanced Prometheus metrics with intelligent alerting
-- **ConfigManager**: Dynamic configuration loading with comprehensive validation
 
 ### Data Flow
 1. User message → Bot handler → ContextManager → IntelligentAIManager → AIParserService → ReminderService → Repository → SQLite
@@ -192,36 +197,15 @@ The system features an advanced multi-provider AI architecture with intelligent 
 ```yaml
 ai:
   enabled: true
-  providers:
-    openai:
-      enabled: true
-      api_key: "${MMEMORY_AI_OPENAI_API_KEY}"
-      base_url: "https://api.openai.com/v1"
-      model: "gpt-4o-mini"
-      temperature: 0.1
-      max_tokens: 1000
-      timeout: "30s"
-      max_retries: 3
-      cost_per_token: 0.00001  # Cost tracking for budget management
-    claude:
-      enabled: true
-      api_key: "${MMEMORY_AI_CLAUDE_API_KEY}"
-      model: "claude-3-5-sonnet-20241022"
-      temperature: 0.1
-      max_tokens: 1000
-      timeout: "30s"
-      max_retries: 3
-      cost_per_token: 0.000015
-  c3:
-    enabled: true
-    budget_limit_per_user: 10.0  # Daily budget per user in USD
-    global_budget_limit: 100.0   # Global daily budget in USD
-    cost_monitoring_interval: "5m"
-    degradation_threshold: 0.7   # Confidence threshold for fallback
-  fallback:
-    enabled: true
-    confidence_threshold: 0.6
-    max_fallback_attempts: 3
+  openai:
+    api_key: "${MMEMORY_AI_OPENAI_API_KEY}"
+    base_url: "https://api.openai.com/v1"
+    primary_model: "gpt-4o-mini"
+    backup_model: "gpt-3.5-turbo"
+    temperature: 0.1
+    max_tokens: 1000
+    timeout: "30s"
+    max_retries: 3
 ```
 
 **Advanced Features**:
@@ -286,12 +270,11 @@ Critical environment variables:
 - `MMEMORY_MONITORING_ENABLED`: Enable Prometheus metrics
 
 **AI-Specific Variables**:
-- `MMEMORY_AI_ENABLED`: Enable/disable AI functionality (default: true)
+- `MMEMORY_AI_ENABLED`: Enable/disable AI functionality (default: false)
 - `MMEMORY_AI_OPENAI_API_KEY`: OpenAI API key
 - `MMEMORY_AI_OPENAI_BASE_URL`: OpenAI API endpoint (supports third-party)
-- `MMEMORY_AI_OPENAI_MODEL`: OpenAI model name (default: "gpt-4o-mini")
-- `MMEMORY_AI_CLAUDE_API_KEY`: Claude AI API key
-- `MMEMORY_AI_CLAUDE_MODEL`: Claude model name (default: "claude-3-5-sonnet-20241022")
+- `MMEMORY_AI_OPENAI_PRIMARY_MODEL`: Primary model name (default: "gpt-4o-mini")
+- `MMEMORY_AI_OPENAI_BACKUP_MODEL`: Backup model name (default: "gpt-3.5-turbo")
 
 **C3 Degradation Variables**:
 - `MMEMORY_AI_C3_ENABLED`: Enable C3 intelligent degradation (default: true)
@@ -359,22 +342,18 @@ The system includes comprehensive monitoring capabilities:
 - `internal/`: Private application code (not importable by other projects)
   - `internal/ai/`: OpenAI client and prompt management
   - `internal/bot/`: Telegram bot handlers
-  - `internal/models/`: Domain models including AI parse results
-  - `internal/repository/`: Data access layer
-  - `internal/service/`: Business logic including AI parsing
+  - `internal/models/`: Domain models including reminders, activities, weather
+  - `internal/repository/`: Data access layer with SQLite implementation
+  - `internal/service/`: Business logic including AI parsing, activities, monitoring
 - `pkg/`: Public packages that can be imported by external projects
-  - `pkg/ai/`: AI configuration and types
-  - `pkg/config/`: Configuration management
+  - `pkg/ai/`: AI configuration, types, provider interfaces, cost control
+  - `pkg/config/`: Configuration management with hot-reload
   - `pkg/logger/`: Logging utilities
   - `pkg/metrics/`: Prometheus metrics
   - `pkg/server/`: HTTP server for metrics
   - `pkg/version/`: Version information management
 - `configs/`: Configuration files and examples
 - `docs/`: Technical documentation and implementation reports
-  - `docs/C1-AI-Parser-Implementation-20250929.md`: AI parser implementation (completed)
-  - `docs/C2-AI-Provider-Implementation-20250930.md`: Multi-provider support (planned)
-  - `docs/C3-Critical-Fixes-And-Enhancements-20251010.md`: Critical bug fixes and user interaction enhancements
-  - `docs/version-management.md`: Version information management guide
 - `scripts/`: Build and deployment automation scripts
 - `test/`: Integration and end-to-end tests
 
@@ -405,36 +384,28 @@ AI-powered suggestion system that learns from user behavior:
 
 ## Recent Changes and Project Status
 
-### Phase 3 - C3 Intelligent AI Integration (Completed)
+### Phase 4 - C6 User Life Recording System (Completed C1-C3, C4, C6)
 - ✅ **C1 Completed** (2025-10-10): AI Parser Interface Design
-  - OpenAI client integration
-  - Fallback chain implementation
-  - Conversation history management
-  - Default Prompt templates
-  - Bug fixes: Empty prompt config and backup model compatibility
+  - OpenAI client integration, fallback chain, conversation history
 - ✅ **C2 Completed** (2025-10-15): Multi-AI Provider Support
-  - Claude AI integration
-  - Provider interface standardization
-  - Dynamic provider selection
-  - Cost tracking implementation
+  - Claude AI integration, dynamic provider selection, cost tracking
 - ✅ **C3 Completed** (2025-10-20): Intelligent Degradation Mechanism
-  - Advanced cost control and budget management
-  - Real-time monitoring and alerting
-  - Confidence-based degradation
-  - Learning system for provider optimization
-- 📋 **C4 In Progress**: Enhanced Features and Testing
-  - Weather service integration
-  - Context-aware suggestions
-  - Comprehensive testing and validation
-  - Performance optimization
+  - Cost control, confidence-based degradation, real-time monitoring
+- ✅ **C4 Completed** (2025-11-09): Enhanced Features
+  - Weather service, context-aware suggestions, Bot API improvements
+- ✅ **C5 Completed** (2025-12-30): Performance Optimization
+  - Database connection pool optimization, dynamic worker pools, AI cost reduction
+- ✅ **C6 Completed** (2025-12-31): User Life Recording System
+  - Activity tracking (drink water, read book, exercise, etc.)
+  - AI-powered activity extraction from conversations
+  - Pattern detection and habit formation analysis
+  - ASCII visualization and activity statistics
+  - Test coverage improved to ~60%
 
 ### Important Notes for Development
-- **Multi-Provider Configuration**: Both OpenAI and Claude APIs should be configured for optimal performance
-- **C3 Budget Management**: Monitor AI usage costs through the built-in cost control system
-- **Context Management**: System maintains intelligent conversation context across provider switches
 - **Build Process**: Use Makefile (`make build`) for consistent binary output to `bin/` with `CGO_ENABLED=1`
 - **Version Management**: Current version is `v0.4.0-dev`, use `/version` command in bot for details
-- **Testing AI**: Set appropriate API keys (`MMEMORY_AI_OPENAI_API_KEY`, `MMEMORY_AI_CLAUDE_API_KEY`) for integration tests
-- **Weather Integration**: Configure `MMEMORY_WEATHER_API_KEY` for location-based features
-- **Monitoring**: C3 system provides real-time cost monitoring and intelligent alerting
-- **Docker**: All environment variables are auto-loaded by docker-compose from `.env` file
+- **AI Testing**: Set `MMEMORY_AI_OPENAI_API_KEY` for AI integration tests
+- **Activity Recording**: C6 introduces new daily activity tracking features
+- **Monitoring**: Access metrics at `http://localhost:9090/metrics`
+- **Docker**: All environment variables are auto-loaded from `.env` file

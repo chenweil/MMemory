@@ -257,3 +257,245 @@ func TestEnhancedCache_GetMostUsed(t *testing.T) {
 	assert.Equal(t, 1, len(mostUsed), "期望获取1个最常使用的条目")
 	assert.Equal(t, "key1", mostUsed[0].Key, "最常使用的应该是key1")
 }
+
+// ============ 驱逐策略测试 ============
+
+// TestEvictionPolicy_LRU 测试 LRU 驱逐策略
+func TestEvictionPolicy_LRU(t *testing.T) {
+	cache := NewEnhancedCacheWithPolicy(5*time.Minute, 3, EvictionPolicyLRU)
+
+	// 添加3个条目
+	cache.Set("key1", "value1")
+	cache.Set("key2", "value2")
+	cache.Set("key3", "value3")
+
+	// 访问 key1 使其成为最近使用
+	cache.Get("key1")
+
+	// 添加第4个条目，应该驱逐 key2（最久未使用）
+	cache.Set("key4", "value4")
+
+	// 验证 key2 被驱逐
+	_, ok := cache.Get("key2")
+	assert.False(t, ok, "key2 应该被驱逐")
+
+	// 验证其他条目仍然存在
+	_, ok = cache.Get("key1")
+	assert.True(t, ok, "key1 应该仍然存在")
+	_, ok = cache.Get("key3")
+	assert.True(t, ok, "key3 应该仍然存在")
+	_, ok = cache.Get("key4")
+	assert.True(t, ok, "key4 应该存在")
+}
+
+// TestEvictionPolicy_LFU 测试 LFU 驱逐策略
+func TestEvictionPolicy_LFU(t *testing.T) {
+	cache := NewEnhancedCacheWithPolicy(5*time.Minute, 3, EvictionPolicyLFU)
+
+	// 添加3个条目
+	cache.Set("key1", "value1")
+	cache.Set("key2", "value2")
+	cache.Set("key3", "value3")
+
+	// 访问 key1 多次
+	cache.Get("key1")
+	cache.Get("key1")
+	cache.Get("key1")
+
+	// 访问 key2 一次
+	cache.Get("key2")
+
+	// 添加第4个条目，应该驱逐 key3（访问频率最低）
+	cache.Set("key4", "value4")
+
+	// 验证 key3 被驱逐
+	_, ok := cache.Get("key3")
+	assert.False(t, ok, "key3 应该被驱逐")
+
+	// 验证其他条目仍然存在
+	_, ok = cache.Get("key1")
+	assert.True(t, ok, "key1 应该仍然存在")
+	_, ok = cache.Get("key2")
+	assert.True(t, ok, "key2 应该仍然存在")
+	_, ok = cache.Get("key4")
+	assert.True(t, ok, "key4 应该存在")
+}
+
+// TestEvictionPolicy_FIFO 测试 FIFO 驱逐策略
+func TestEvictionPolicy_FIFO(t *testing.T) {
+	cache := NewEnhancedCacheWithPolicy(5*time.Minute, 3, EvictionPolicyFIFO)
+
+	// 添加3个条目
+	cache.Set("key1", "value1")
+	cache.Set("key2", "value2")
+	cache.Set("key3", "value3")
+
+	// 访问 key1（FIFO 不关心访问顺序）
+	cache.Get("key1")
+	cache.Get("key1")
+
+	// 添加第4个条目，应该驱逐 key1（最先添加的）
+	cache.Set("key4", "value4")
+
+	// 验证 key1 被驱逐
+	_, ok := cache.Get("key1")
+	assert.False(t, ok, "key1 应该被驱逐")
+
+	// 验证其他条目仍然存在
+	_, ok = cache.Get("key2")
+	assert.True(t, ok, "key2 应该仍然存在")
+	_, ok = cache.Get("key3")
+	assert.True(t, ok, "key3 应该仍然存在")
+	_, ok = cache.Get("key4")
+	assert.True(t, ok, "key4 应该存在")
+}
+
+// TestEvictionPolicy_TTL 测试 TTL 驱逐策略
+func TestEvictionPolicy_TTL(t *testing.T) {
+	cache := NewEnhancedCacheWithPolicy(10*time.Millisecond, 3, EvictionPolicyTTL)
+
+	// 添加3个条目
+	cache.Set("key1", "value1")
+	cache.Set("key2", "value2")
+	cache.Set("key3", "value3")
+
+	// 添加第4个条目（TTL 策略不主动驱逐，但会驱逐最旧的）
+	cache.Set("key4", "value4")
+
+	// 验证缓存大小
+	assert.Equal(t, 4, cache.Size(), "TTL 策略应该允许超过 maxSize")
+
+	// 所有条目都应该存在（因为 TTL 策略不主动驱逐）
+	_, ok := cache.Get("key1")
+	assert.True(t, ok, "key1 应该存在")
+	_, ok = cache.Get("key2")
+	assert.True(t, ok, "key2 应该存在")
+	_, ok = cache.Get("key3")
+	assert.True(t, ok, "key3 应该存在")
+	_, ok = cache.Get("key4")
+	assert.True(t, ok, "key4 应该存在")
+
+	// 等待过期
+	time.Sleep(20 * time.Millisecond)
+
+	// 所有条目都应该过期
+	_, ok = cache.Get("key1")
+	assert.False(t, ok, "key1 应该过期")
+	_, ok = cache.Get("key2")
+	assert.False(t, ok, "key2 应该过期")
+}
+
+// TestEvictionPolicy_Switching 测试策略切换
+func TestEvictionPolicy_Switching(t *testing.T) {
+	cache := NewEnhancedCacheWithPolicy(5*time.Minute, 3, EvictionPolicyLRU)
+
+	// 使用 LRU 策略
+	cache.Set("key1", "value1")
+	cache.Set("key2", "value2")
+	cache.Set("key3", "value3")
+	cache.Get("key1") // 使 key1 成为最近使用
+
+	// 切换到 FIFO 策略
+	cache.SetEvictionPolicy(EvictionPolicyFIFO)
+	assert.Equal(t, EvictionPolicyFIFO, cache.GetEvictionPolicy())
+
+	// 添加第4个条目，应该驱逐 key1（最先添加的）
+	cache.Set("key4", "value4")
+
+	_, ok := cache.Get("key1")
+	assert.False(t, ok, "key1 应该被驱逐（FIFO 策略）")
+
+	// 切换回 LRU 策略
+	cache.SetEvictionPolicy(EvictionPolicyLRU)
+	assert.Equal(t, EvictionPolicyLRU, cache.GetEvictionPolicy())
+}
+
+// TestEvictionPolicy_Performance 测试策略性能
+func TestEvictionPolicy_Performance(t *testing.T) {
+	policies := []EvictionPolicy{
+		EvictionPolicyLRU,
+		EvictionPolicyLFU,
+		EvictionPolicyFIFO,
+		EvictionPolicyTTL,
+	}
+
+	for _, policy := range policies {
+		t.Run(string(policy), func(t *testing.T) {
+			cache := NewEnhancedCacheWithPolicy(5*time.Minute, 1000, policy)
+
+			// 添加 2000 个条目
+			for i := 0; i < 2000; i++ {
+				cache.Set(fmt.Sprintf("key%d", i), fmt.Sprintf("value%d", i))
+			}
+
+			// 验证缓存大小（TTL 策略不限制大小）
+			if policy != EvictionPolicyTTL {
+				assert.Equal(t, 1000, cache.Size(), "缓存大小应该为 maxSize")
+			}
+
+			// 随机访问一些条目
+			for i := 0; i < 100; i++ {
+				key := fmt.Sprintf("key%d", i%1000)
+				cache.Get(key)
+			}
+
+			// 获取统计信息
+			stats := cache.GetStats()
+			assert.GreaterOrEqual(t, stats.ItemsAdded, int64(2000), "应该添加了至少 2000 个条目")
+		})
+	}
+}
+
+// TestEvictionPolicy_Concurrency 测试并发安全性
+func TestEvictionPolicy_Concurrency(t *testing.T) {
+	policies := []EvictionPolicy{
+		EvictionPolicyLRU,
+		EvictionPolicyLFU,
+		EvictionPolicyFIFO,
+	}
+
+	for _, policy := range policies {
+		t.Run(string(policy), func(t *testing.T) {
+			cache := NewEnhancedCacheWithPolicy(5*time.Minute, 100, policy)
+
+			// 并发写入
+			done := make(chan bool)
+			for i := 0; i < 10; i++ {
+				go func(id int) {
+					for j := 0; j < 100; j++ {
+						key := fmt.Sprintf("goroutine%d_key%d", id, j)
+						cache.Set(key, j)
+					}
+					done <- true
+				}(i)
+			}
+
+			// 等待所有 goroutine 完成
+			for i := 0; i < 10; i++ {
+				<-done
+			}
+
+			// 并发读取
+			for i := 0; i < 10; i++ {
+				go func(id int) {
+					for j := 0; j < 100; j++ {
+						key := fmt.Sprintf("goroutine%d_key%d", id, j)
+						cache.Get(key)
+					}
+					done <- true
+				}(i)
+			}
+
+			// 等待所有 goroutine 完成
+			for i := 0; i < 10; i++ {
+				<-done
+			}
+
+			// 验证缓存状态
+			assert.Equal(t, 100, cache.Size(), "缓存大小应该为 maxSize")
+
+			stats := cache.GetStats()
+			assert.GreaterOrEqual(t, stats.ItemsAdded, int64(1000), "应该添加了至少 1000 个条目")
+		})
+	}
+}

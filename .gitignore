@@ -16,7 +16,7 @@ Thumbs.db
 # 忽略 Go 构建文件
 /bin/
 /dist/
-bot
+/bot
 mmemory
 coverage.out
 coverage.html

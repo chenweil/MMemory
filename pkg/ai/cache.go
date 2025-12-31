@@ -2,33 +2,58 @@ package ai
 
 import (
 	"container/list"
+	"math"
 	"sync"
 	"time"
 
 	"mmemory/pkg/metrics"
 )
 
+// EvictionPolicy 驱逐策略类型
+type EvictionPolicy string
+
+const (
+	EvictionPolicyLRU  EvictionPolicy = "lru"  // Least Recently Used
+	EvictionPolicyLFU  EvictionPolicy = "lfu"  // Least Frequently Used
+	EvictionPolicyFIFO EvictionPolicy = "fifo" // First In First Out
+	EvictionPolicyTTL  EvictionPolicy = "ttl"  // Time To Live
+)
+
+// EvictionStrategy 驱逐策略接口
+type EvictionStrategy interface {
+	ShouldEvict(cache *EnhancedCache) bool
+	SelectVictim(cache *EnhancedCache) string
+	OnAccess(entry *CacheEntry)
+	OnAdd(entry *CacheEntry)
+}
+
 // CacheEntry 缓存条目
 type CacheEntry struct {
-	Key        string
-	Value      interface{}
-	Expiration time.Time
-	AccessedAt time.Time
+	Key         string
+	Value       interface{}
+	Expiration  time.Time
+	AccessedAt  time.Time
 	AccessCount int64
+	AddedAt     time.Time // 添加时间，用于 FIFO
 }
 
 // EnhancedCache 增强版内存缓存
 type EnhancedCache struct {
 	items     map[string]*list.Element
 	lruList   *list.List // LRU 链表
+	fifoQueue *list.List // FIFO 队列（用于 FIFO 策略）
 	ttl       time.Duration
 	maxSize   int
 	maxMemory int64 // 最大内存使用（字节）
 	currentMemory int64
 
+	// 驱逐策略
+	evictionStrategy EvictionStrategy
+	policyType       EvictionPolicy
+
 	// 统计
-	mu          sync.RWMutex
-	stats       CacheStats
+	mu    sync.RWMutex
+	stats CacheStats
 }
 
 // CacheStats 缓存统计
@@ -41,19 +66,59 @@ type CacheStats struct {
 	CurrentSize int
 }
 
-// NewEnhancedCache 创建增强版缓存
+// NewEnhancedCache 创建增强版缓存（默认 LRU 策略）
 func NewEnhancedCache(ttl time.Duration, maxSize int) *EnhancedCache {
+	return NewEnhancedCacheWithPolicy(ttl, maxSize, EvictionPolicyLRU)
+}
+
+// NewEnhancedCacheWithPolicy 创建指定驱逐策略的缓存
+func NewEnhancedCacheWithPolicy(ttl time.Duration, maxSize int, policy EvictionPolicy) *EnhancedCache {
 	cache := &EnhancedCache{
-		items:   make(map[string]*list.Element),
-		lruList: list.New(),
-		ttl:     ttl,
-		maxSize: maxSize,
+		items:     make(map[string]*list.Element),
+		lruList:   list.New(),
+		fifoQueue: list.New(),
+		ttl:       ttl,
+		maxSize:   maxSize,
+		policyType: policy,
 	}
+
+	// 根据策略初始化驱逐策略
+	cache.evictionStrategy = cache.createStrategy(policy)
 
 	// 启动清理协程
 	go cache.cleanup()
 
 	return cache
+}
+
+// createStrategy 根据策略类型创建驱逐策略实例
+func (c *EnhancedCache) createStrategy(policy EvictionPolicy) EvictionStrategy {
+	switch policy {
+	case EvictionPolicyLFU:
+		return &LFUStrategy{}
+	case EvictionPolicyFIFO:
+		return &FIFOStrategy{queue: c.fifoQueue}
+	case EvictionPolicyTTL:
+		return &TTLStrategy{}
+	default:
+		return &LRUStrategy{lruList: c.lruList}
+	}
+}
+
+// SetEvictionPolicy 动态切换驱逐策略
+func (c *EnhancedCache) SetEvictionPolicy(policy EvictionPolicy) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
+	c.policyType = policy
+	c.evictionStrategy = c.createStrategy(policy)
+}
+
+// GetEvictionPolicy 获取当前驱逐策略
+func (c *EnhancedCache) GetEvictionPolicy() EvictionPolicy {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+	return c.policyType
 }
 
 // Get 获取缓存
@@ -74,15 +139,25 @@ func (c *EnhancedCache) Get(key string) (interface{}, bool) {
 	if time.Now().After(entry.Expiration) {
 		delete(c.items, key)
 		c.lruList.Remove(element)
+		c.fifoQueue.Remove(element) // 从 FIFO 队列中移除
 		c.stats.Misses++
 		metrics.RecordCacheMiss()
 		return nil, false
 	}
 
-	// 更新访问信息（LRU）
-	c.lruList.MoveToFront(element)
+	// 更新访问信息
 	entry.AccessedAt = time.Now()
 	entry.AccessCount++
+
+	// LRU 策略：将元素移动到链表前端
+	if c.policyType == EvictionPolicyLRU {
+		c.lruList.MoveToFront(element)
+	}
+
+	// 调用驱逐策略的 OnAccess 回调
+	if c.evictionStrategy != nil {
+		c.evictionStrategy.OnAccess(entry)
+	}
 
 	c.stats.Hits++
 	c.stats.ItemsHit++
@@ -106,13 +181,23 @@ func (c *EnhancedCache) Set(key string, value interface{}) {
 		entry.Expiration = expiration
 		entry.AccessedAt = now
 		entry.AccessCount++
-		c.lruList.MoveToFront(element)
+
+		// 调用驱逐策略的 OnAccess 回调
+		if c.evictionStrategy != nil {
+			c.evictionStrategy.OnAccess(entry)
+		}
+
 		return
 	}
 
 	// 检查是否需要驱逐
 	if c.maxSize > 0 && len(c.items) >= c.maxSize {
-		c.evictOldest()
+		if c.evictionStrategy != nil && c.evictionStrategy.ShouldEvict(c) {
+			victimKey := c.evictionStrategy.SelectVictim(c)
+			if victimKey != "" {
+				c.deleteInternal(victimKey)
+			}
+		}
 	}
 
 	// 添加新条目
@@ -122,22 +207,52 @@ func (c *EnhancedCache) Set(key string, value interface{}) {
 		Expiration:  expiration,
 		AccessedAt:  now,
 		AccessCount: 1,
+		AddedAt:     now,
 	}
 
-	element := c.lruList.PushFront(entry)
-	c.items[key] = element
+	// 添加到 LRU 链表
+	lruElement := c.lruList.PushFront(entry)
+	c.items[key] = lruElement
+
+	// 添加到 FIFO 队列
+	fifoElement := c.fifoQueue.PushBack(key)
+
+	// 将两个链表元素关联起来（使用相同的值）
+	lruElement.Value = entry
+	fifoElement.Value = key
+
+	// 调用驱逐策略的 OnAdd 回调
+	if c.evictionStrategy != nil {
+		c.evictionStrategy.OnAdd(entry)
+	}
+
 	c.stats.ItemsAdded++
+}
+
+// deleteInternal 内部删除方法（不获取锁）
+func (c *EnhancedCache) deleteInternal(key string) {
+	if element, exists := c.items[key]; exists {
+		delete(c.items, key)
+		c.lruList.Remove(element)
+
+		// 从 FIFO 队列中移除
+		for e := c.fifoQueue.Front(); e != nil; e = e.Next() {
+			if e.Value.(string) == key {
+				c.fifoQueue.Remove(e)
+				break
+			}
+		}
+
+		c.stats.Evictions++
+		metrics.RecordCacheEviction()
+	}
 }
 
 // Delete 删除缓存条目
 func (c *EnhancedCache) Delete(key string) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
-
-	if element, exists := c.items[key]; exists {
-		delete(c.items, key)
-		c.lruList.Remove(element)
-	}
+	c.deleteInternal(key)
 }
 
 // evictOldest 驱逐最久未使用的条目
@@ -192,6 +307,7 @@ func (c *EnhancedCache) Clear() {
 
 	c.items = make(map[string]*list.Element)
 	c.lruList = list.New()
+	c.fifoQueue = list.New()
 }
 
 // cleanup 定期清理过期条目
@@ -211,6 +327,16 @@ func (c *EnhancedCache) cleanup() {
 				c.lruList.Remove(element)
 				evicted++
 			}
+		}
+
+		// 清理 FIFO 队列中的过期条目
+		for e := c.fifoQueue.Front(); e != nil; {
+			next := e.Next()
+			key := e.Value.(string)
+			if _, exists := c.items[key]; !exists {
+				c.fifoQueue.Remove(e)
+			}
+			e = next
 		}
 
 		if evicted > 0 {
@@ -273,4 +399,128 @@ func (c *EnhancedCache) GetMostUsed(limit int) []CacheEntry {
 	}
 
 	return entries
+}
+
+// ============ 驱逐策略实现 ============
+
+// LRUStrategy Least Recently Used 策略
+type LRUStrategy struct {
+	lruList *list.List
+}
+
+func (s *LRUStrategy) ShouldEvict(cache *EnhancedCache) bool {
+	return cache.maxSize > 0 && len(cache.items) >= cache.maxSize
+}
+
+func (s *LRUStrategy) SelectVictim(cache *EnhancedCache) string {
+	if element := s.lruList.Back(); element != nil {
+		entry := element.Value.(*CacheEntry)
+		return entry.Key
+	}
+	return ""
+}
+
+func (s *LRUStrategy) OnAccess(entry *CacheEntry) {
+	// LRU 策略需要将访问的元素移动到链表前端
+	// 注意：这里无法直接访问 cache.lruList，需要在 cache.Get 中处理
+}
+
+func (s *LRUStrategy) OnAdd(entry *CacheEntry) {
+	// LRU 策略在 Set 方法中已经处理了 PushFront
+}
+
+// LFUStrategy Least Frequently Used 策略
+type LFUStrategy struct {
+	frequencyMap map[string]int64
+	mu           sync.RWMutex
+}
+
+func (s *LFUStrategy) ShouldEvict(cache *EnhancedCache) bool {
+	return cache.maxSize > 0 && len(cache.items) >= cache.maxSize
+}
+
+func (s *LFUStrategy) SelectVictim(cache *EnhancedCache) string {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	var minFreq int64 = math.MaxInt64
+	var victimKey string
+
+	// 遍历所有条目，找到访问频率最低的
+	for key, element := range cache.items {
+		entry := element.Value.(*CacheEntry)
+		freq, exists := s.frequencyMap[key]
+		if !exists {
+			freq = entry.AccessCount
+		}
+		if freq < minFreq {
+			minFreq = freq
+			victimKey = key
+		}
+	}
+
+	return victimKey
+}
+
+func (s *LFUStrategy) OnAccess(entry *CacheEntry) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.frequencyMap == nil {
+		s.frequencyMap = make(map[string]int64)
+	}
+	s.frequencyMap[entry.Key]++
+}
+
+func (s *LFUStrategy) OnAdd(entry *CacheEntry) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.frequencyMap == nil {
+		s.frequencyMap = make(map[string]int64)
+	}
+	s.frequencyMap[entry.Key] = 1
+}
+
+// FIFOStrategy First In First Out 策略
+type FIFOStrategy struct {
+	queue *list.List
+}
+
+func (s *FIFOStrategy) ShouldEvict(cache *EnhancedCache) bool {
+	return cache.maxSize > 0 && len(cache.items) >= cache.maxSize
+}
+
+func (s *FIFOStrategy) SelectVictim(cache *EnhancedCache) string {
+	if element := s.queue.Front(); element != nil {
+		return element.Value.(string)
+	}
+	return ""
+}
+
+func (s *FIFOStrategy) OnAccess(entry *CacheEntry) {
+	// FIFO 策略不关心访问顺序
+}
+
+func (s *FIFOStrategy) OnAdd(entry *CacheEntry) {
+	// FIFO 策略在 Set 方法中已经处理了 PushBack
+}
+
+// TTLStrategy Time To Live 策略
+type TTLStrategy struct{}
+
+func (s *TTLStrategy) ShouldEvict(cache *EnhancedCache) bool {
+	// TTL 策略总是依赖过期时间，不主动驱逐
+	return false
+}
+
+func (s *TTLStrategy) SelectVictim(cache *EnhancedCache) string {
+	// TTL 策略不主动选择受害者
+	return ""
+}
+
+func (s *TTLStrategy) OnAccess(entry *CacheEntry) {
+	// TTL 策略不关心访问顺序
+}
+
+func (s *TTLStrategy) OnAdd(entry *CacheEntry) {
+	// TTL 策略不关心添加顺序
 }
