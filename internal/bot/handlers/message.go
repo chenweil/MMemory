@@ -72,16 +72,16 @@ func NewMessageHandler(
 	activityAnalysisService service.ActivityAnalysisService,
 ) *MessageHandler {
 	return &MessageHandler{
-		reminderService:                reminderService,
-		userService:                    userService,
-		reminderLogService:             reminderLogService,
-		aiParserService:                aiParserService,
-		conversationService:            conversationService,
-		contextManager:                 contextManager,
-		suggestionService:              suggestionService,
-		dailyActivityService:           dailyActivityService,
-		activityVisualizationService:   activityVisualizationService,
-		activityAnalysisService:        activityAnalysisService,
+		reminderService:              reminderService,
+		userService:                  userService,
+		reminderLogService:           reminderLogService,
+		aiParserService:              aiParserService,
+		conversationService:          conversationService,
+		contextManager:               contextManager,
+		suggestionService:            suggestionService,
+		dailyActivityService:         dailyActivityService,
+		activityVisualizationService: activityVisualizationService,
+		activityAnalysisService:      activityAnalysisService,
 	}
 }
 
@@ -416,6 +416,28 @@ func (h *MessageHandler) handleWithAI(ctx context.Context, bot botinterface.BotA
 	case ai.IntentActivityAnalysis:
 		return h.handleActivityAnalysisIntent(ctx, bot, message, user, parseResult)
 	case ai.IntentChat:
+		// 检查chat response是否为空
+		if parseResult.ChatResponse == nil || parseResult.ChatResponse.Response == "" {
+			logger.Warnf("Chat intent detected but response is empty, trying fallback chat")
+			// 尝试使用fallback对话生成器
+			if reply, err := h.aiParserService.Chat(ctx, fmt.Sprintf("%d", user.ID), message.Text); err == nil && reply != nil && reply.Response != "" {
+				logger.Infof("Fallback chat succeeded: %s", reply.ParsedBy)
+				// 保存对话上下文
+				if h.contextManager != nil {
+					sessionID := fmt.Sprintf("chat-%d", message.Chat.ID)
+					_ = h.contextManager.UpdateContextState(ctx, service.UpdateContextStateInput{
+						UserID:    user.ID,
+						SessionID: sessionID,
+						State:     "chatting",
+						Intent:    string(ai.IntentChat),
+					})
+				}
+				return h.sendMessage(bot, message.Chat.ID, reply.Response)
+			}
+			// 如果fallback也失败，返回默认提示
+			logger.Warnf("Fallback chat also failed, using default message")
+			return h.sendMessage(bot, message.Chat.ID, "我在想怎么回答你...但好像有点卡住了 🤔\n\n试试问我其他问题？")
+		}
 		return h.handleChatIntent(ctx, bot, message, user, parseResult)
 	case ai.IntentSummary:
 		return h.handleSummaryIntent(ctx, bot, message, user, parseResult)

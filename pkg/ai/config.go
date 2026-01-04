@@ -6,10 +6,10 @@ import (
 
 // AIConfig AI配置结构
 type AIConfig struct {
-	Enabled            bool                      `mapstructure:"enabled" yaml:"enabled"`
-	OpenAI             OpenAIConfig               `mapstructure:"openai" yaml:"openai"`
-	Prompts            PromptsConfig              `mapstructure:"prompts" yaml:"prompts"`
-	ContextManagement ContextManagementConfig    `mapstructure:"context_management" yaml:"context_management"`
+	Enabled           bool                    `mapstructure:"enabled" yaml:"enabled"`
+	OpenAI            OpenAIConfig            `mapstructure:"openai" yaml:"openai"`
+	Prompts           PromptsConfig           `mapstructure:"prompts" yaml:"prompts"`
+	ContextManagement ContextManagementConfig `mapstructure:"context_management" yaml:"context_management"`
 }
 
 // OpenAIConfig OpenAI配置
@@ -42,17 +42,17 @@ type ContextManagementConfig struct {
 
 // CompressionConfig 压缩配置
 type CompressionConfig struct {
-	AISummaryEnabled bool `mapstructure:"ai_summary_enabled" yaml:"ai_summary_enabled"` // 是否启用AI摘要
-	MaxSummaryLength int  `mapstructure:"max_summary_length" yaml:"max_summary_length"`   // 最大摘要长度
-	WarningThreshold  float64 `mapstructure:"warning_threshold" yaml:"warning_threshold"`   // 警告阈值（如0.8表示80%）
+	AISummaryEnabled   bool    `mapstructure:"ai_summary_enabled" yaml:"ai_summary_enabled"`     // 是否启用AI摘要
+	MaxSummaryLength   int     `mapstructure:"max_summary_length" yaml:"max_summary_length"`     // 最大摘要长度
+	WarningThreshold   float64 `mapstructure:"warning_threshold" yaml:"warning_threshold"`       // 警告阈值（如0.8表示80%）
 	HardLimitThreshold float64 `mapstructure:"hard_limit_threshold" yaml:"hard_limit_threshold"` // 硬限制阈值（如0.95表示95%）
 }
 
 // ArchiveConfig 归档配置
 type ArchiveConfig struct {
-	FullContentTTL  time.Duration `mapstructure:"full_content_ttl" yaml:"full_content_ttl"`   // 完整内容TTL
-	EnableAsync     bool          `mapstructure:"enable_async" yaml:"enable_async"`            // 是否异步归档
-	AutoCleanup     bool          `mapstructure:"auto_cleanup" yaml:"auto_cleanup"`             // 是否自动清理
+	FullContentTTL time.Duration `mapstructure:"full_content_ttl" yaml:"full_content_ttl"` // 完整内容TTL
+	EnableAsync    bool          `mapstructure:"enable_async" yaml:"enable_async"`         // 是否异步归档
+	AutoCleanup    bool          `mapstructure:"auto_cleanup" yaml:"auto_cleanup"`         // 是否自动清理
 }
 
 // GetDefaultAIConfig 获取默认AI配置
@@ -76,15 +76,15 @@ func GetDefaultAIConfig() *AIConfig {
 		ContextManagement: ContextManagementConfig{
 			Enabled: true, // 默认启用上下文管理
 			Compression: CompressionConfig{
-				AISummaryEnabled:    true,  // 默认启用AI摘要
-				MaxSummaryLength:    200,   // 默认最大200字摘要
-				WarningThreshold:    0.80,  // 80%警告阈值
-				HardLimitThreshold:  0.95,  // 95%硬限制阈值
+				AISummaryEnabled:   true, // 默认启用AI摘要
+				MaxSummaryLength:   200,  // 默认最大200字摘要
+				WarningThreshold:   0.80, // 80%警告阈值
+				HardLimitThreshold: 0.95, // 95%硬限制阈值
 			},
 			Archive: ArchiveConfig{
 				FullContentTTL: 720 * time.Hour, // 完整内容30天过期
-				EnableAsync:    true,             // 默认异步归档
-				AutoCleanup:    true,             // 默认自动清理
+				EnableAsync:    true,            // 默认异步归档
+				AutoCleanup:    true,            // 默认自动清理
 			},
 		},
 	}
@@ -162,6 +162,10 @@ func getDefaultReminderPrompt() string {
    - "这条记录错了，删除掉" → 根据上下文判断活动类型和条件
 11. 总结统计 (summary) - 获取提醒或日志的统计信息
 12. 普通对话 (chat) - 闲聊、问候等非提醒类对话（注意：不是查询类的对话）
+    ⚠️ **重要：chat intent必须生成response字段！**
+    - 回复内容要简洁、友好，50-200字为宜
+    - 主动延续话题，提出相关问题
+    - 不要返回空的response
 
 时间格式说明:
 - 支持绝对时间: "明天8点", "下周一9点"
