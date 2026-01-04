@@ -2,6 +2,7 @@ package handlers
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"sort"
 	"strconv"
@@ -755,6 +756,10 @@ func (h *MessageHandler) handleRecordActivityIntent(ctx context.Context, bot bot
 		return h.sendMessage(bot, message.Chat.ID, "无法识别活动类型")
 	}
 
+	// 调试日志：打印 AI 返回的 details
+	detailsJSON, _ := json.Marshal(parseResult.RecordActivity.Details)
+	logger.Infof("AI 解析的 activity_details: %s", string(detailsJSON))
+
 	_, err := h.dailyActivityService.RecordActivity(
 		ctx,
 		user.ID,
@@ -764,12 +769,34 @@ func (h *MessageHandler) handleRecordActivityIntent(ctx context.Context, bot bot
 	)
 
 	if err != nil {
-		logger.Errorf("记录活动失败: %v", err)
+		logger.Errorf("记录活动失���: %v", err)
 		return h.sendErrorMessage(bot, message.Chat.ID, "记录活动失败，请稍后重试")
 	}
 
-	confirmMsg := fmt.Sprintf("✅ 已记录：%s", getActivityTypeDisplayName(activityType))
-	return h.sendMessage(bot, message.Chat.ID, confirmMsg)
+	// 尝试使用AI生成个性化回复
+	var reply string
+	if h.aiParserService != nil {
+		aiReply, err := h.aiParserService.GenerateActivityReply(
+			ctx,
+			fmt.Sprintf("%d", user.ID),
+			message.Text,
+			string(activityType),
+			parseResult.RecordActivity.Details,
+		)
+
+		if err != nil {
+			logger.Warnf("AI生成活动回复失败,使用简单确认: %v", err)
+			// 降级为简单确认
+			reply = fmt.Sprintf("✅ 已记录:%s", getActivityTypeDisplayName(activityType))
+		} else {
+			reply = aiReply
+		}
+	} else {
+		// AI服务不可用,使用简单确认
+		reply = fmt.Sprintf("✅ 已记录:%s", getActivityTypeDisplayName(activityType))
+	}
+
+	return h.sendMessage(bot, message.Chat.ID, reply)
 }
 
 // handleQueryActivityIntent 处理查询活动意图
