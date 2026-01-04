@@ -40,4 +40,6 @@ coverage.html
 .claude/
 *.bak
 .claude/settings.local.json
-.iflow/agents/golang-pro.md
+
+# 忽略 iflow 工具目录
+.iflow/
