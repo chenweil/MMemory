@@ -67,6 +67,7 @@ func main() {
 	reminderLogRepo := sqlite.NewReminderLogRepository(database.GetDB())
 	conversationRepo := sqlite.NewConversationRepository(database.GetDB())
 	conversationContextRepo := sqlite.NewConversationContextRepository(database.GetDB())
+	conversationArchiveRepo := sqlite.NewConversationArchiveRepository(database.GetDB())
 	dailyActivityRepo := sqlite.NewDailyActivityRepository(database.GetDB())
 
 	// 初始化Telegram Bot（使用自定义HTTP客户端）
@@ -89,12 +90,18 @@ func main() {
 	monitoringService := service.NewMonitoringService(userRepo, reminderRepo, reminderLogRepo)
 	conversationService := service.NewConversationService(conversationRepo)
 	dailyActivityService := service.NewDailyActivityService(dailyActivityRepo)
+
+	// 临时创建一个基础的ContextManager（稍后会替换为带Token管理的版本）
 	contextManager := service.NewContextManager(
 		conversationContextRepo,
 		&service.DefaultEntityExtractor{},
 		&service.DefaultIntentTracker{},
 		service.ContextManagerConfig{},
+		nil, // tokenManager - 先传nil
+		nil, // archiveService - 先传nil
+		0,   // maxTokens - 使用默认值
 	)
+
 	suggestionService := service.NewReminderSuggestionService(
 		reminderRepo,
 		reminderLogRepo,
@@ -168,6 +175,48 @@ func main() {
 	} else {
 		logger.Info("ℹ️ AI功能未启用，使用传统解析器")
 	}
+
+	// 重新创建带Token管理功能的ContextManager（Task 8: 集成新服务）
+	var aiClientForArchive ai.AIClient
+	if aiParserService != nil {
+		// TODO: 从AIParserService获取AI客户端（需要进一步集成）
+		// 目前先使用nil，ArchiveService会使用降级策略
+		logger.Info("ℹ️ 存档服务的AI摘要功能暂未集成，将使用降级策略")
+	}
+
+	// 创建存档服务
+	conversationArchiveService := service.NewConversationArchiveService(
+		conversationArchiveRepo,
+		aiClientForArchive,
+		nil, // config - 将在Task 9中添加
+	)
+
+	// 创建Token管理器（默认128k tokens，适合GLM-4）
+	contextTokenManager := service.NewContextTokenManagerService(
+		conversationArchiveService,
+		128000, // 128k tokens (GLM-4 max)
+	)
+
+	// 重新创建上下文管理器（集成Token管理和归档服务）
+	contextManager = service.NewContextManager(
+		conversationContextRepo,
+		&service.DefaultEntityExtractor{},
+		&service.DefaultIntentTracker{},
+		service.ContextManagerConfig{},
+		contextTokenManager,
+		conversationArchiveService,
+		128000, // maxTokens - 与Token管理器保持一致
+	)
+
+	// 重新创建SuggestionService（使用新的ContextManager）
+	suggestionService = service.NewReminderSuggestionService(
+		reminderRepo,
+		reminderLogRepo,
+		contextManager,
+		service.SuggestionServiceConfig{},
+	)
+
+	logger.Info("✅ 上下文Token管理和归档服务已集成")
 
 	// 建立服务之间的依赖关系
 	if reminderServiceWithScheduler, ok := reminderService.(interface {
