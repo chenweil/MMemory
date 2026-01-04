@@ -73,3 +73,24 @@ type DailyActivityRepository interface {
 	Delete(ctx context.Context, id uint) error
 	GetStatistics(ctx context.Context, userID uint, startTime, endTime time.Time) (map[string]int64, error)
 }
+
+// ConversationArchiveRepository 存档仓库接口
+type ConversationArchiveRepository interface {
+	// Create 创建存档
+	Create(ctx context.Context, archive *models.ConversationArchive) error
+
+	// GetByUserID 获取用户的所有存档
+	GetByUserID(ctx context.Context, userID uint, limit int, offset int) ([]*models.ConversationArchive, error)
+
+	// GetByID 根据ID获取存档
+	GetByID(ctx context.Context, id uint) (*models.ConversationArchive, error)
+
+	// Delete 删除存档
+	Delete(ctx context.Context, id uint) error
+
+	// DeleteExpired 删除过期存档
+	DeleteExpired(ctx context.Context) (int64, error)
+
+	// CountByUserID 统计用户存档数量
+	CountByUserID(ctx context.Context, userID uint) (int64, error)
+}

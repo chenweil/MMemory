@@ -192,6 +192,7 @@ func (d *Database) AutoMigrate() error {
 		&models.Conversation{},
 		&models.ConversationContext{},
 		&models.DailyActivity{},
+		&models.ConversationArchive{}, // 新增
 	)
 }
 
