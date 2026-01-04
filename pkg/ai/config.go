@@ -27,6 +27,7 @@ type OpenAIConfig struct {
 type PromptsConfig struct {
 	ReminderParse string `mapstructure:"reminder_parse" yaml:"reminder_parse"`
 	ChatResponse  string `mapstructure:"chat_response" yaml:"chat_response"`
+	ActivityReply string `mapstructure:"activity_reply" yaml:"activity_reply"` // 活动记录个性化回复
 }
 
 // GetDefaultAIConfig 获取默认AI配置
@@ -45,6 +46,7 @@ func GetDefaultAIConfig() *AIConfig {
 		Prompts: PromptsConfig{
 			ReminderParse: getDefaultReminderPrompt(),
 			ChatResponse:  getDefaultChatPrompt(),
+			ActivityReply: getDefaultActivityReplyPrompt(),
 		},
 	}
 }
@@ -97,13 +99,15 @@ func getDefaultReminderPrompt() string {
    - 吃药: "吃了药", "今天吃了阿莫西林" → activity_type="take_medicine", details={"medicine_name": "阿莫西林"}
    - 看书: "正在看书", "读了第十一章", "看了《如何阅读一本书》" → activity_type="read_book", details={"book_name": "如何阅读一本书", "chapter": "第十一章"}
    - 运动: "跑了5公里", "健身了", "跳绳30分钟" → activity_type="exercise", details={"type": "跑步", "distance": "5公里"}
-9. 查询活动 (query_activity) - 查询历史活动记录
+9. 查询活动 (query_activity) - 查询历史活动记录（重要：任何询问"看过、读过、做过、是否、哪些、多少次、进度"等都是查询）
    - "我看过哪些书？" → query_type="by_type", activity_type="read_book"
    - "昨天喝水了吗？" → query_type="by_time", time_range="昨天"
    - "最近运动了多少次？" → query_type="by_type", activity_type="exercise"
    - "这周看了多少书？" → query_type="statistics", activity_type="read_book", time_range="这周"
+   - "书读到哪了？" → query_type="by_type", activity_type="read_book"
+   - "我上次说的书是什么？" → query_type="by_type", activity_type="read_book"
 10. 总结统计 (summary) - 获取提醒或日志的统计信息
-11. 普通对话 (chat) - 闲聊、问候等非提醒类对话
+11. 普通对话 (chat) - 闲聊、问候等非提醒类对话（注意：不是查询类的对话）
 
 时间格式说明:
 - 支持绝对时间: "明天8点", "下周一9点"
@@ -245,4 +249,45 @@ AI: "《如何阅读一本书》是经典的阅读方法指南，讲了阅读的
 
 用户: "我读到第十一章了。你知道这个章节的大标题吗？"
 AI: "第十一章的主题通常是'论实用型书籍的阅读方法'，这部分讲了如何阅读实用性书籍。"`
+}
+
+// getDefaultActivityReplyPrompt 默认活动回复Prompt
+func getDefaultActivityReplyPrompt() string {
+	return `你是MMemory智能助手,用户刚刚记录了一个日常活动。请生成友好、个性化的回复。
+
+用户消息: "{{.UserMessage}}"
+活动类型: {{.ActivityType}}
+活动详情: {{.Details}}
+
+要求:
+1. 生成友好的回复,像日常人类交流一样自然
+2. 根据活动类型提供相关信息:
+   - 看书: 可以提一下书籍背景、作者信息、阅读建议
+   - 喝水: 鼓励健康习惯,提醒适量饮水
+   - 运动: 肯定用户的努力,可以提运动的好处
+   - 吃药: 提醒按时用药,祝早日康复
+   - 其他: 给予积极回应
+3. 必须包含"✅ 已记录: [活动类型]"的确认信息
+4. 保持简洁,回复在50字以内
+5. 如果是看书活动,可以简单提一两句关于这本书的信息
+6. 不要过度展开,保持对话的开放性
+
+示例:
+
+用户消息: "我在看《时间简史》第二章"
+活动类型: read_book
+活动详情: {"book_name":"时间简史","chapter":"第二章"}
+回复: "《时间简史》是霍金的经典科普著作,用通俗易懂的方式解释宇宙奥秘。✅ 已记录:看书-读到第二章"
+
+用户消息: "我刚才喝了杯水"
+活动类型: drink_water
+活动详情: {"amount":"1杯"}
+回复: "很好!保持适量饮水有助于新陈代谢。✅ 已记录:喝水"
+
+用户消息: "今天跑了5公里"
+活动类型: exercise
+活动详情: {"type":"跑步","distance":"5公里"}
+回复: "太棒了!5公里跑步是很好的有氧运动。✅ 已记录:运动-跑步5公里"
+
+请直接返回回复内容,不需要JSON格式。`
 }
