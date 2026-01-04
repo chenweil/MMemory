@@ -256,3 +256,57 @@ type ActivityInsights struct {
 	Summary           string              `json:"summary"`
 	GeneratedAt       time.Time           `json:"generated_at"`
 }
+
+// ========== Context Management Interfaces ==========
+
+// CleanupStrategy 清理策略类型
+type CleanupStrategy int
+
+const (
+	StrategyNone      CleanupStrategy = iota
+	StrategySmartClean                 // 智能清理: 删除不重要
+	StrategyForceClean                 // 强制清理: 保留最近N条,其余归档
+)
+
+// String 返回策略的字符串表示
+func (s CleanupStrategy) String() string {
+	switch s {
+	case StrategySmartClean:
+		return "smart_clean"
+	case StrategyForceClean:
+		return "force_clean"
+	default:
+		return "none"
+	}
+}
+
+// ContextTokenManagerService Token管理服务接口
+type ContextTokenManagerService interface {
+	// NeedsPruning 检查是否需要清理
+	NeedsPruning(messages []models.ConversationMessage) (bool, float64)
+
+	// PruneMessages 清理消息(状态无关)
+	// 返回: (保留的消息, 需要归档的消息, 使用的策略)
+	PruneMessages(messages []models.ConversationMessage) ([]models.ConversationMessage, []models.ConversationMessage, CleanupStrategy)
+}
+
+// ConversationArchiveService 存档服务接口
+type ConversationArchiveService interface {
+	// CreateArchive 创建存档(同步)
+	CreateArchive(ctx context.Context, userID uint, messages []models.ConversationMessage, archiveType models.ArchiveType) (*models.ConversationArchive, error)
+
+	// CreateArchiveAsync 异步创建存档(fire-and-forget,带降级策略)
+	CreateArchiveAsync(userID uint, messages []models.ConversationMessage, archiveType models.ArchiveType)
+
+	// GenerateSummary 生成摘要(使用AI)
+	GenerateSummary(ctx context.Context, messages []models.ConversationMessage) (string, error)
+
+	// ExtractKeyEntities 提取关键实体
+	ExtractKeyEntities(messages []models.ConversationMessage) (*models.KeyEntities, error)
+
+	// GetUserArchives 获取用户存档
+	GetUserArchives(ctx context.Context, userID uint, limit int) ([]*models.ConversationArchive, error)
+
+	// CleanupExpiredArchives 清理过期存档
+	CleanupExpiredArchives(ctx context.Context) (int64, error)
+}
