@@ -273,10 +273,59 @@ func (c *OpenAIClient) formatConversationHistory(history string) string {
 func (c *OpenAIClient) buildChatPrompt(message string) string {
 	prompt := c.config.Prompts.ChatResponse
 	prompt = strings.ReplaceAll(prompt, "{{.Message}}", message)
-	
+
 	// TODO: 后续添加对话历史支持
 	prompt = strings.ReplaceAll(prompt, "{{.ConversationHistory}}", "")
-	
+
+	return prompt
+}
+
+// GenerateActivityReply 生成活动记录的个性化回复
+func (c *OpenAIClient) GenerateActivityReply(ctx context.Context, userMessage string, activityType string, details map[string]interface{}) (string, error) {
+	start := time.Now()
+
+	// 限流检查
+	if err := c.rateLimiter.Wait(ctx); err != nil {
+		return "", ai.NewAIError(ai.ErrorTypeTimeout, "rate limit exceeded", err)
+	}
+
+	// 序列化详情
+	detailsJSON, err := json.Marshal(details)
+	if err != nil {
+		return "", fmt.Errorf("failed to marshal activity details: %w", err)
+	}
+
+	// 构建活动回复prompt
+	prompt := c.buildActivityReplyPrompt(userMessage, activityType, string(detailsJSON))
+
+	// 调用OpenAI API
+	response, err := c.callOpenAIWithRetry(ctx, prompt, c.config.OpenAI.PrimaryModel)
+	if err != nil {
+		return "", fmt.Errorf("activity reply generation failed: %w", err)
+	}
+
+	// 清理响应内容
+	reply := strings.TrimSpace(response)
+	reply = strings.Trim(reply, "\"'`") // 移除可能的引号
+
+	logger.Infof("Activity reply generated in %v for activity type: %s", time.Since(start), activityType)
+	return reply, nil
+}
+
+// buildActivityReplyPrompt 构建活动回复prompt
+func (c *OpenAIClient) buildActivityReplyPrompt(userMessage, activityType, details string) string {
+	prompt := c.config.Prompts.ActivityReply
+
+	// 如果配置中没有prompt，使用默认值
+	if prompt == "" {
+		prompt = ai.GetDefaultActivityReplyPrompt()
+	}
+
+	// 替换模板变量
+	prompt = strings.ReplaceAll(prompt, "{{.UserMessage}}", userMessage)
+	prompt = strings.ReplaceAll(prompt, "{{.ActivityType}}", activityType)
+	prompt = strings.ReplaceAll(prompt, "{{.Details}}", details)
+
 	return prompt
 }
 

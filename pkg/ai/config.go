@@ -46,7 +46,7 @@ func GetDefaultAIConfig() *AIConfig {
 		Prompts: PromptsConfig{
 			ReminderParse: getDefaultReminderPrompt(),
 			ChatResponse:  getDefaultChatPrompt(),
-			ActivityReply: getDefaultActivityReplyPrompt(),
+			ActivityReply: GetDefaultActivityReplyPrompt(),
 		},
 	}
 }
@@ -251,8 +251,8 @@ AI: "《如何阅读一本书》是经典的阅读方法指南，讲了阅读的
 AI: "第十一章的主题通常是'论实用型书籍的阅读方法'，这部分讲了如何阅读实用性书籍。"`
 }
 
-// getDefaultActivityReplyPrompt 默认活动回复Prompt
-func getDefaultActivityReplyPrompt() string {
+// GetDefaultActivityReplyPrompt 默认活动回复Prompt（导出供外部使用）
+func GetDefaultActivityReplyPrompt() string {
 	return `你是MMemory智能助手,用户刚刚记录了一个日常活动。请生成友好、个性化的回复。
 
 用户消息: "{{.UserMessage}}"
