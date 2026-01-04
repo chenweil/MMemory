@@ -37,6 +37,9 @@ func newTestContextManager(t *testing.T) *ContextManager {
 			MaxMessages: 3,
 			DefaultTTL:  10 * time.Minute,
 		},
+		nil, // tokenManager - 禁用自动清理
+		nil, // archiveService
+		0,   // maxTokens - 使用默认值
 	)
 
 	manager.nowFunc = func() time.Time {

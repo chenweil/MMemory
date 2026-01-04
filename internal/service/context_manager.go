@@ -9,6 +9,8 @@ import (
 
 	"mmemory/internal/models"
 	"mmemory/internal/repository/interfaces"
+	"mmemory/pkg/logger"
+	"mmemory/pkg/metrics"
 )
 
 const (
@@ -47,12 +49,16 @@ type ContextManagerConfig struct {
 
 // ContextManager 上下文管理器
 type ContextManager struct {
-	repo        interfaces.ConversationContextRepository
-	extractor   EntityExtractor
-	intent      IntentTracker
-	maxMessages int
-	defaultTTL  time.Duration
-	nowFunc     func() time.Time
+	repo              interfaces.ConversationContextRepository
+	extractor         EntityExtractor
+	intent            IntentTracker
+	maxMessages       int
+	defaultTTL        time.Duration
+	nowFunc           func() time.Time
+	tokenManager      ContextTokenManagerService
+	archiveService    ConversationArchiveService
+	maxTokens         int
+	enableAutoCleanup bool // 是否启用自动清理
 }
 
 // EntityExtractor 实体提取器接口
@@ -71,6 +77,9 @@ func NewContextManager(
 	extractor EntityExtractor,
 	intent IntentTracker,
 	config ContextManagerConfig,
+	tokenManager ContextTokenManagerService,
+	archiveService ConversationArchiveService,
+	maxTokens int,
 ) *ContextManager {
 	maxMessages := config.MaxMessages
 	if maxMessages <= 0 {
@@ -82,13 +91,21 @@ func NewContextManager(
 		defaultTTL = 30 * time.Minute
 	}
 
+	if maxTokens <= 0 {
+		maxTokens = 128000 // 默认128k
+	}
+
 	return &ContextManager{
-		repo:        repo,
-		extractor:   extractor,
-		intent:      intent,
-		maxMessages: maxMessages,
-		defaultTTL:  defaultTTL,
-		nowFunc:     time.Now,
+		repo:              repo,
+		extractor:         extractor,
+		intent:            intent,
+		maxMessages:       maxMessages,
+		defaultTTL:        defaultTTL,
+		nowFunc:           time.Now,
+		tokenManager:      tokenManager,
+		archiveService:    archiveService,
+		maxTokens:         maxTokens,
+		enableAutoCleanup: true, // 默认启用自动清理
 	}
 }
 
@@ -149,6 +166,40 @@ func (m *ContextManager) ProcessMessage(ctx context.Context, input ProcessMessag
 		Entities:  messageEntities,
 		Timestamp: now,
 	})
+
+	// 自动清理：检查Token使用率并触发清理
+	if m.enableAutoCleanup && m.tokenManager != nil {
+		if needsPruning, _ := m.tokenManager.NeedsPruning(currentState.Messages); needsPruning {
+			// 清理消息
+			toKeep, toArchive, strategy := m.tokenManager.PruneMessages(currentState.Messages)
+
+			// 记录清理指标
+			userStr := fmt.Sprintf("%d", input.UserID)
+			metrics.RecordContextCleanup(userStr, strategy.String())
+
+			// 异步归档被清理的消息
+			if len(toArchive) > 0 && m.archiveService != nil {
+				// 选择归档类型：强制清理使用摘要，智能清理使用完整内容
+				var archiveType models.ArchiveType
+				if strategy == StrategyForceClean {
+					archiveType = models.ArchiveTypeSummary // 强制清理时尝试摘要
+				} else {
+					archiveType = models.ArchiveTypeFull // 智能清理时使用完整内容
+				}
+
+				m.archiveService.CreateArchiveAsync(input.UserID, toArchive, archiveType)
+
+				logger.Infof("自动清理: userID=%d, strategy=%s, kept=%d, archived=%d",
+					input.UserID, strategy.String(), len(toKeep), len(toArchive))
+			}
+
+			// 更新当前状态的消息列表
+			currentState.Messages = toKeep
+
+			// 记录压缩指标
+			metrics.RecordContextCompression(userStr, true)
+		}
+	}
 
 	currentState.LastActivity = now
 	if currentState.CreatedAt.IsZero() {
