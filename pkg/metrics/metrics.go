@@ -479,6 +479,28 @@ var (
 			Help: "Total number of cache evictions",
 		},
 	)
+
+	CacheHitRate = promauto.NewGaugeVec(
+		prometheus.GaugeOpts{
+			Name: "mmemory_cache_hit_rate",
+			Help: "Cache hit rate percentage",
+		},
+		[]string{"cache_name", "policy"},
+	)
+
+	CacheItemsAddedTotal = promauto.NewCounter(
+		prometheus.CounterOpts{
+			Name: "mmemory_cache_items_added_total",
+			Help: "Total number of items added to cache",
+		},
+	)
+
+	CacheItemsHitTotal = promauto.NewCounter(
+		prometheus.CounterOpts{
+			Name: "mmemory_cache_items_hit_total",
+			Help: "Total number of cache item hits",
+		},
+	)
 )
 
 // RecordQueryTotal 记录总查询数
@@ -519,4 +541,19 @@ func SetCacheSize(size float64) {
 // RecordCacheEviction 记录缓存驱逐
 func RecordCacheEviction() {
 	CacheEvictionsTotal.Inc()
+}
+
+// RecordCacheHitRate 记录缓存命中率
+func RecordCacheHitRate(cacheName, policy string, rate float64) {
+	CacheHitRate.WithLabelValues(cacheName, policy).Set(rate)
+}
+
+// RecordCacheItemAdded 记录缓存项添加
+func RecordCacheItemAdded() {
+	CacheItemsAddedTotal.Inc()
+}
+
+// RecordCacheItemHit 记录缓存项命中
+func RecordCacheItemHit() {
+	CacheItemsHitTotal.Inc()
 }

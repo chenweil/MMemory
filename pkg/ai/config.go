@@ -113,8 +113,16 @@ func getDefaultReminderPrompt() string {
    - "这周看了多少书？" → query_type="statistics", activity_type="read_book", time_range="这周"
    - "书读到哪了？" → query_type="by_type", activity_type="read_book"
    - "我上次说的书是什么？" → query_type="by_type", activity_type="read_book"
-10. 总结统计 (summary) - 获取提醒或日志的统计信息
-11. 普通对话 (chat) - 闲聊、问候等非提醒类对话（注意：不是查询类的对话）
+10. 删除活动记录 (delete_activity) - 删除指定的活动记录
+   **删除关键词**：删除、去掉、移除、清除、不要、错了、错误
+   ✅ **正确的删除示例**：
+   - "把《？》这条记录删除" → activity_type="read_book", criteria={"book_name": "？"}
+   - "删除昨天的喝水记录" → activity_type="drink_water", criteria={"time_range": "昨天"}
+   - "清除《书》的阅读记录" → activity_type="read_book", criteria={"book_name": "书"}
+   - "移除错误的那条运动记录" → activity_type="exercise", criteria={"is_error": true}
+   - "这条记录错了，删除掉" → 根据上下文判断活动类型和条件
+11. 总结统计 (summary) - 获取提醒或日志的统计信息
+12. 普通对话 (chat) - 闲聊、问候等非提醒类对话（注意：不是查询类的对话）
 
 时间格式说明:
 - 支持绝对时间: "明天8点", "下周一9点"
@@ -134,7 +142,7 @@ func getDefaultReminderPrompt() string {
 
 请返回以下JSON格式(不要包含markdown代码块标记):
 {
-  "intent": "reminder|delete|edit|pause|resume|weather|record_activity|query_activity|chat|summary|query",
+  "intent": "reminder|delete|edit|pause|resume|weather|record_activity|query_activity|delete_activity|chat|summary|query",
   "confidence": 0.95,
   "reminder": {
     "title": "具体要做的事情",
@@ -184,6 +192,10 @@ func getDefaultReminderPrompt() string {
     "activity_type": "read_book",
     "time_range": "今天|昨天|最近7天|这周"
   },
+  "delete_activity": {
+    "activity_type": "drink_water|take_medicine|read_book|exercise|sleep|eat|custom",
+    "criteria": {"book_name": "书名", "time_range": "昨天"}
+  },
   "chat_response": {
     "response": "如果是对话意图的回复内容",
     "need_follow_up": false
@@ -232,6 +244,12 @@ func getDefaultReminderPrompt() string {
 
  用户: "这周运动了多少次？"
  返回: {"intent":"query_activity","confidence":0.9,"query_activity":{"query_type":"statistics","activity_type":"exercise","time_range":"这周"}}
+
+ 用户: "把《？》这条记录删除"
+ 返回: {"intent":"delete_activity","confidence":0.9,"delete_activity":{"activity_type":"read_book","criteria":{"book_name":"？"}}}
+
+ 用户: "删除昨天的喝水记录"
+ 返回: {"intent":"delete_activity","confidence":0.85,"delete_activity":{"activity_type":"drink_water","criteria":{"time_range":"昨天"}}}
 
  用户: "我在看《三体》"
  返回: {"intent":"chat","confidence":0.9,"chat_response":{"response":"《三体》是刘慈欣的经典科幻小说，讲述了人类文明与三体文明的接触。你觉得哪个情节最印象深刻？","need_follow_up":true}}

@@ -409,6 +409,8 @@ func (h *MessageHandler) handleWithAI(ctx context.Context, bot botinterface.BotA
 		return h.handleRecordActivityIntent(ctx, bot, message, user, parseResult)
 	case ai.IntentQueryActivity:
 		return h.handleQueryActivityIntent(ctx, bot, message, user, parseResult)
+	case ai.IntentDeleteActivity:
+		return h.handleDeleteActivityIntent(ctx, bot, message, user, parseResult)
 	case ai.IntentActivityVisualize:
 		return h.handleActivityVisualizeIntent(ctx, bot, message, user, parseResult)
 	case ai.IntentActivityAnalysis:
@@ -823,6 +825,64 @@ func (h *MessageHandler) handleQueryActivityIntent(ctx context.Context, bot boti
 	}
 
 	return h.sendMessage(bot, message.Chat.ID, response)
+}
+
+// handleDeleteActivityIntent 处理删除活动意图
+func (h *MessageHandler) handleDeleteActivityIntent(ctx context.Context, bot botinterface.BotAPI, message *tgbotapi.Message, user *models.User, parseResult *ai.ParseResult) error {
+	if h.dailyActivityService == nil {
+		return h.sendMessage(bot, message.Chat.ID, "活动删除功能暂未启用")
+	}
+
+	if parseResult.DeleteActivity == nil {
+		return h.sendMessage(bot, message.Chat.ID, "无法识别删除条件")
+	}
+
+	deleteInfo := parseResult.DeleteActivity
+	activityType := models.ActivityType(deleteInfo.ActivityType)
+
+	// 执行删除
+	deleted, err := h.dailyActivityService.DeleteActivities(
+		ctx,
+		user.ID,
+		activityType,
+		deleteInfo.Criteria,
+	)
+
+	if err != nil {
+		logger.Errorf("删除活动记录失败: %v", err)
+		return h.sendErrorMessage(bot, message.Chat.ID, "删除失败，请稍后重试")
+	}
+
+	// 生成友好的回复消息
+	if deleted > 0 {
+		// 根据活动类型生成不同的消息
+		var activityName string
+		switch activityType {
+		case models.ActivityTypeReadBook:
+			activityName = "阅读"
+		case models.ActivityTypeDrinkWater:
+			activityName = "喝水"
+		case models.ActivityTypeExercise:
+			activityName = "运动"
+		case models.ActivityTypeTakeMedicine:
+			activityName = "吃药"
+		default:
+			activityName = string(activityType)
+		}
+
+		// 如果有具体条件，显示详细信息
+		if bookName, ok := deleteInfo.Criteria["book_name"].(string); ok {
+			return h.sendMessage(bot, message.Chat.ID, fmt.Sprintf("✅ 已删除《%s》的阅读记录", bookName))
+		}
+
+		if timeRange, ok := deleteInfo.Criteria["time_range"].(string); ok {
+			return h.sendMessage(bot, message.Chat.ID, fmt.Sprintf("✅ 已删除%s的%s记录", timeRange, activityName))
+		}
+
+		return h.sendMessage(bot, message.Chat.ID, fmt.Sprintf("✅ 已删除 %d 条%s记录", deleted, activityName))
+	}
+
+	return h.sendMessage(bot, message.Chat.ID, "没有找到匹配的记录")
 }
 
 // handleActivityVisualizeIntent 处理活动可视化意图

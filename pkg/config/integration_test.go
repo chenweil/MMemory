@@ -57,7 +57,7 @@ logging:
 app:
   name: "MMemoryIntegration"
   version: "v0.0.1"
-  environment: "testing"
+  environment: "development"
 
 monitoring:
   enabled: true
@@ -175,7 +175,7 @@ logging:
 app:
   name: "MMemoryIntegrationUpdated"  # 修改了这里
   version: "v0.0.2"  # 修改了这里
-  environment: "testing"
+  environment: "development"
 
 monitoring:
   enabled: true

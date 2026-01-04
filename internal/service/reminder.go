@@ -7,6 +7,7 @@ import (
 
 	"mmemory/internal/models"
 	"mmemory/internal/repository/interfaces"
+	"mmemory/pkg/logger"
 )
 
 type reminderService struct {
@@ -184,9 +185,11 @@ type EditReminderParams struct {
 	NewPattern      *string // 新的重复模式，可选
 	NewTitle        *string // 新的标题，可选
 	NewDescription  *string // 新的描述，可选
+	EditType        string  // 编辑类型：manual, ai, button（可选）
+	EditReason      string  // 编辑原因（可选）
 }
 
-// EditReminder 编辑提醒（支持部分更新）
+// EditReminder 编辑提醒（支持部分更新和历史记录）
 func (s *reminderService) EditReminder(ctx context.Context, params EditReminderParams) error {
 	if params.ReminderID == 0 {
 		return fmt.Errorf("提醒ID不能为空")
@@ -204,23 +207,39 @@ func (s *reminderService) EditReminder(ctx context.Context, params EditReminderP
 	// 记录是否有修改
 	modified := false
 
-	// 2. 应用修改
+	// 2. 应用修改并记录历史
 	if params.NewTime != nil && *params.NewTime != "" {
+		// 记录编辑历史
+		if err := s.recordEditHistory(ctx, reminder, "time", reminder.TargetTime, *params.NewTime, params.EditType, params.EditReason); err != nil {
+			logger.Warnf("记录编辑历史失败: %v", err)
+		}
 		reminder.TargetTime = *params.NewTime
 		modified = true
 	}
 
 	if params.NewPattern != nil && *params.NewPattern != "" {
+		// 记录编辑历史
+		if err := s.recordEditHistory(ctx, reminder, "pattern", reminder.SchedulePattern, *params.NewPattern, params.EditType, params.EditReason); err != nil {
+			logger.Warnf("记录编辑历史失败: %v", err)
+		}
 		reminder.SchedulePattern = *params.NewPattern
 		modified = true
 	}
 
 	if params.NewTitle != nil && *params.NewTitle != "" {
+		// 记录编辑历史
+		if err := s.recordEditHistory(ctx, reminder, "title", reminder.Title, *params.NewTitle, params.EditType, params.EditReason); err != nil {
+			logger.Warnf("记录编辑历史失败: %v", err)
+		}
 		reminder.Title = *params.NewTitle
 		modified = true
 	}
 
 	if params.NewDescription != nil {
+		// 记录编辑历史
+		if err := s.recordEditHistory(ctx, reminder, "description", reminder.Description, *params.NewDescription, params.EditType, params.EditReason); err != nil {
+			logger.Warnf("记录编辑历史失败: %v", err)
+		}
 		reminder.Description = *params.NewDescription
 		modified = true
 	}
@@ -248,4 +267,47 @@ func (s *reminderService) EditReminder(ctx context.Context, params EditReminderP
 	}
 
 	return nil
+}
+
+// recordEditHistory 记录编辑历史
+func (s *reminderService) recordEditHistory(ctx context.Context, reminder *models.Reminder, fieldName, oldValue, newValue, editType, editReason string) error {
+	// 暂时使用日志记录，后续可以通过数据库持久化
+	logger.Infof("编辑历史: 提醒ID=%d, 字段=%s, 旧值=%s, 新值=%s, 类型=%s",
+		reminder.ID, fieldName, oldValue, newValue, editType)
+
+	// TODO: 实现数据库持久化
+	// history := &models.ReminderEditHistory{
+	// 	ReminderID: reminder.ID,
+	// 	UserID:     reminder.UserID,
+	// 	FieldName:  fieldName,
+	// 	OldValue:   oldValue,
+	// 	NewValue:   newValue,
+	// 	EditType:   editType,
+	// 	EditReason: editReason,
+	// }
+	// return s.editHistoryRepo.Create(ctx, history)
+	return nil
+}
+
+// RollbackEdit 回滚编辑到指定历史记录
+func (s *reminderService) RollbackEdit(ctx context.Context, reminderID uint, historyID uint) error {
+	// TODO: 实现回滚功能
+	// 1. 从数据库获取历史记录
+	// 2. 恢复旧值
+	// 3. 更新提醒
+	// 4. 刷新调度器
+
+	logger.Infof("回滚提醒 #%d 到历史记录 #%d", reminderID, historyID)
+	return fmt.Errorf("回滚功能暂未实现")
+}
+
+// GetEditHistory 获取提醒的编辑历史
+func (s *reminderService) GetEditHistory(ctx context.Context, reminderID uint, limit int) ([]*models.ReminderEditHistory, error) {
+	// TODO: 实现获取编辑历史功能
+	// 1. 从数据库查询编辑历史记录
+	// 2. 按时间倒序排列
+	// 3. 返回结果
+
+	logger.Infof("获取提醒 #%d 的编辑历史，限制=%d", reminderID, limit)
+	return nil, fmt.Errorf("获取编辑历史功能暂未实现")
 }

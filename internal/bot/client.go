@@ -15,7 +15,7 @@ func NewBotWithCustomClient(token string, debug bool) (*tgbotapi.BotAPI, error) 
 		Transport: &http.Transport{
 			MaxIdleConns:        100,
 			MaxIdleConnsPerHost: 10,
-			IdleConnTimeout:     90 * time.Second,
+			IdleConnTimeout:     300 * time.Second, // 增加到5分钟，避免在long polling间隙连接被关闭
 			TLSHandshakeTimeout: 10 * time.Second,
 			DisableKeepAlives:   false, // 保持连接复用
 			ForceAttemptHTTP2:   true,  // 优先使用HTTP/2

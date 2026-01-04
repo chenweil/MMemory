@@ -1,6 +1,7 @@
 package ai
 
 import (
+	"context"
 	"fmt"
 	"testing"
 	"time"
@@ -498,4 +499,149 @@ func TestEvictionPolicy_Concurrency(t *testing.T) {
 			assert.GreaterOrEqual(t, stats.ItemsAdded, int64(1000), "应该添加了至少 1000 个条目")
 		})
 	}
+}
+
+// ============ 缓存预热测试 ============
+
+// TestCacheWarmUp 测试缓存预热
+func TestCacheWarmUp(t *testing.T) {
+	dataSource := NewMockDataSource()
+	dataSource.Set("key1", "value1")
+	dataSource.Set("key2", "value2")
+	dataSource.Set("key3", "value3")
+
+	cache := NewEnhancedCache(5*time.Minute, 100)
+
+	// 执行预热
+	ctx := context.Background()
+	err := cache.WarmUpWithKeys(ctx, dataSource, []string{"key1", "key2", "key3"})
+	assert.NoError(t, err, "预热应该成功")
+
+	// 验证数据已加载
+	value, ok := cache.Get("key1")
+	assert.True(t, ok, "key1 应该存在")
+	assert.Equal(t, "value1", value, "key1 的值应该正确")
+
+	value, ok = cache.Get("key2")
+	assert.True(t, ok, "key2 应该存在")
+	assert.Equal(t, "value2", value, "key2 的值应该正确")
+
+	value, ok = cache.Get("key3")
+	assert.True(t, ok, "key3 应该存在")
+	assert.Equal(t, "value3", value, "key3 的值应该正确")
+}
+
+// TestCacheWarmUp_PartialFailure 测试预热部分失败
+func TestCacheWarmUp_PartialFailure(t *testing.T) {
+	dataSource := NewMockDataSource()
+	dataSource.Set("key1", "value1")
+	dataSource.Set("key2", "value2")
+	// key3 不存在
+
+	cache := NewEnhancedCache(5*time.Minute, 100)
+
+	// 执行预热（包含不存在的键）
+	ctx := context.Background()
+	err := cache.WarmUpWithKeys(ctx, dataSource, []string{"key1", "key2", "key3"})
+	assert.NoError(t, err, "预热应该成功（即使部分失败）")
+
+	// 验证存在的键已加载
+	value, ok := cache.Get("key1")
+	assert.True(t, ok, "key1 应该存在")
+	assert.Equal(t, "value1", value)
+
+	value, ok = cache.Get("key2")
+	assert.True(t, ok, "key2 应该存在")
+	assert.Equal(t, "value2", value)
+
+	// 验证不存在的键未加载
+	_, ok = cache.Get("key3")
+	assert.False(t, ok, "key3 不应该存在")
+}
+
+// TestCacheWarmUp_Async 测试异步预热
+func TestCacheWarmUp_Async(t *testing.T) {
+	dataSource := NewMockDataSource()
+	dataSource.Set("key1", "value1")
+	dataSource.Set("key2", "value2")
+
+	cache := NewEnhancedCache(5*time.Minute, 100)
+
+	config := WarmUpConfig{
+		Enabled: true,
+		Keys:    []string{"key1", "key2"},
+	}
+	warmer := NewCacheWarmer(config, dataSource)
+
+	ctx := context.Background()
+	err := cache.StartWarmUp(ctx, warmer)
+	assert.NoError(t, err, "异步预热应该成功启动")
+
+	// 等待预热完成
+	time.Sleep(100 * time.Millisecond)
+
+	// 验证数据已加载
+	value, ok := cache.Get("key1")
+	assert.True(t, ok, "key1 应该存在")
+	assert.Equal(t, "value1", value)
+
+	value, ok = cache.Get("key2")
+	assert.True(t, ok, "key2 应该存在")
+	assert.Equal(t, "value2", value)
+}
+
+// TestCacheWarmUp_Disabled 测试禁用预热
+func TestCacheWarmUp_Disabled(t *testing.T) {
+	dataSource := NewMockDataSource()
+	dataSource.Set("key1", "value1")
+
+	cache := NewEnhancedCache(5*time.Minute, 100)
+
+	config := WarmUpConfig{
+		Enabled: false, // 禁用预热
+		Keys:    []string{"key1"},
+	}
+	warmer := NewCacheWarmer(config, dataSource)
+
+	ctx := context.Background()
+	err := warmer.WarmUp(ctx, cache)
+	assert.NoError(t, err, "禁用预热应该返回 nil")
+
+	// 验证数据未加载
+	_, ok := cache.Get("key1")
+	assert.False(t, ok, "key1 不应该存在（预热被禁用）")
+}
+
+// TestCacheWarmUp_Overwrite 测试预热覆盖已存在的数据
+func TestCacheWarmUp_Overwrite(t *testing.T) {
+	dataSource := NewMockDataSource()
+	dataSource.Set("key1", "new_value")
+
+	cache := NewEnhancedCache(5*time.Minute, 100)
+
+	// 先设置一个值
+	cache.Set("key1", "old_value")
+
+	// 执行预热
+	ctx := context.Background()
+	err := cache.WarmUpWithKeys(ctx, dataSource, []string{"key1"})
+	assert.NoError(t, err)
+
+	// 验证值被更新
+	value, ok := cache.Get("key1")
+	assert.True(t, ok, "key1 应该存在")
+	assert.Equal(t, "new_value", value, "key1 的值应该被预热数据覆盖")
+}
+
+// TestCacheWarmUp_EmptyKeys 测试空键列表
+func TestCacheWarmUp_EmptyKeys(t *testing.T) {
+	dataSource := NewMockDataSource()
+	cache := NewEnhancedCache(5*time.Minute, 100)
+
+	ctx := context.Background()
+	err := cache.WarmUpWithKeys(ctx, dataSource, []string{})
+	assert.NoError(t, err, "空键列表应该成功")
+
+	// 验证缓存为空
+	assert.Equal(t, 0, cache.Size(), "缓存应该为空")
 }

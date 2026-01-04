@@ -242,6 +242,11 @@ func (m *MockConversationService) GetContextData(ctx context.Context, userID uin
 	return args.Error(0)
 }
 
+func (m *MockConversationService) GetConversationHistory(ctx context.Context, userID uint, days int) (string, error) {
+	args := m.Called(ctx, userID, days)
+	return args.String(0), args.Error(1)
+}
+
 // 测试辅助函数
 func createTestUser() *models.User {
 	return &models.User{

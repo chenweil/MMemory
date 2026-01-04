@@ -2,10 +2,13 @@ package ai
 
 import (
 	"container/list"
+	"context"
+	"fmt"
 	"math"
 	"sync"
 	"time"
 
+	"mmemory/pkg/logger"
 	"mmemory/pkg/metrics"
 )
 
@@ -343,6 +346,13 @@ func (c *EnhancedCache) cleanup() {
 			c.stats.Evictions += int64(evicted)
 		}
 
+		// 记录缓存命中率指标
+		hitRate := c.GetHitRate()
+		metrics.RecordCacheHitRate("default", string(c.policyType), hitRate)
+
+		// 记录缓存大小
+		metrics.SetCacheSize(float64(c.Size()))
+
 		c.mu.Unlock()
 	}
 }
@@ -523,4 +533,119 @@ func (s *TTLStrategy) OnAccess(entry *CacheEntry) {
 
 func (s *TTLStrategy) OnAdd(entry *CacheEntry) {
 	// TTL 策略不关心添加顺序
+}
+
+// ============ 缓存预热 ============
+
+// Warmer 缓存预热器接口
+type Warmer interface {
+	WarmUp(ctx context.Context, cache *EnhancedCache) error
+}
+
+// WarmUpConfig 预热配置
+type WarmUpConfig struct {
+	Enabled   bool
+	OnStartup bool
+	OnDemand  bool
+	Keys      []string // 预热的键列表
+}
+
+// DataSource 数据源接口（用于预热）
+type DataSource interface {
+	Get(ctx context.Context, key string) (interface{}, error)
+}
+
+// CacheWarmer 缓存预热器
+type CacheWarmer struct {
+	config     WarmUpConfig
+	dataSource DataSource
+}
+
+// NewCacheWarmer 创建缓存预热器
+func NewCacheWarmer(config WarmUpConfig, dataSource DataSource) *CacheWarmer {
+	return &CacheWarmer{
+		config:     config,
+		dataSource: dataSource,
+	}
+}
+
+// WarmUp 执行预热
+func (w *CacheWarmer) WarmUp(ctx context.Context, cache *EnhancedCache) error {
+	if !w.config.Enabled {
+		return nil
+	}
+
+	successCount := 0
+	failCount := 0
+
+	for _, key := range w.config.Keys {
+		value, err := w.dataSource.Get(ctx, key)
+		if err != nil {
+			failCount++
+			continue
+		}
+
+		cache.Set(key, value)
+		successCount++
+	}
+
+	if successCount > 0 {
+		logger.Infof("缓存预热完成，成功加载 %d 个条目，失败 %d 个", successCount, failCount)
+	}
+
+	return nil
+}
+
+// StartWarmUp 启动预热（异步）
+func (c *EnhancedCache) StartWarmUp(ctx context.Context, warmer Warmer) error {
+	go func() {
+		if err := warmer.WarmUp(ctx, c); err != nil {
+			logger.Errorf("缓存预热失败: %v", err)
+		}
+	}()
+	return nil
+}
+
+// WarmUpWithKeys 使用指定的键进行预热
+func (c *EnhancedCache) WarmUpWithKeys(ctx context.Context, dataSource DataSource, keys []string) error {
+	config := WarmUpConfig{
+		Enabled: true,
+		Keys:    keys,
+	}
+	warmer := NewCacheWarmer(config, dataSource)
+	return warmer.WarmUp(ctx, c)
+}
+
+// ============ 测试辅助数据源 ============
+
+// MockDataSource 模拟数据源（用于测试）
+type MockDataSource struct {
+	data map[string]interface{}
+	mu   sync.RWMutex
+}
+
+// NewMockDataSource 创建模拟数据源
+func NewMockDataSource() *MockDataSource {
+	return &MockDataSource{
+		data: make(map[string]interface{}),
+	}
+}
+
+// Set 设置数据
+func (m *MockDataSource) Set(key string, value interface{}) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.data[key] = value
+}
+
+// Get 获取数据
+func (m *MockDataSource) Get(ctx context.Context, key string) (interface{}, error) {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+
+	value, exists := m.data[key]
+	if !exists {
+		return nil, fmt.Errorf("key not found: %s", key)
+	}
+	return value, nil
 }

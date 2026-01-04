@@ -186,6 +186,21 @@ func (p *RegexParser) Parse(ctx context.Context, userID string, message string) 
 func (p *RegexParser) ParseWithContext(ctx context.Context, userID string, message string, conversationHistory string) (*ai.ParseResult, error) {
 	message = strings.TrimSpace(message)
 
+	// 首先检查活动记录模式
+	if activityResult := p.checkActivityPatterns(message); activityResult != nil {
+		return activityResult, nil
+	}
+
+	// 检���删除活动模式
+	if deleteResult := p.checkDeleteActivityPatterns(message); deleteResult != nil {
+		return deleteResult, nil
+	}
+
+	// 检查查询模式
+	if queryResult := p.checkQueryPatterns(message); queryResult != nil {
+		return queryResult, nil
+	}
+
 	// 遍历所有模式进行匹配
 	for _, pattern := range p.patterns {
 		matches := pattern.Pattern.FindStringSubmatch(message)
@@ -197,6 +212,259 @@ func (p *RegexParser) ParseWithContext(ctx context.Context, userID string, messa
 
 	// 没有匹配到任何模式
 	return nil, ai.NewAIError(ai.ErrorTypeParsing, "no regex pattern matched", nil)
+}
+
+// checkActivityPatterns 检查活动记录模式
+func (p *RegexParser) checkActivityPatterns(message string) *ai.ParseResult {
+	// 记录看书活动
+	// 匹配：看/读/阅读 + 书名（可选书名号）+ 可选的章节
+	bookPattern := regexp.MustCompile(`(看|读|阅读|在看书|在读书).*?(?:《(.+?)》|"(.+?)"|「(.+?)」|『(.+?)』|书名[是为][:是](.+?)|(?:书|文章|本)(?:名|叫|是)?([^\s第章]+?))(?:.*?(第[一两二三四五六七八九十百千万0-9]+章|第[一两二三四五六七八九十百千万0-9]+节|Chapter\s*\d+|\d+章|Part\s*\d+))?`)
+	if matches := bookPattern.FindStringSubmatch(message); len(matches) > 0 {
+		// 提取书名
+		var bookName string
+		// 优先从带书名号的捕获组中提取
+		for i := 3; i <= 8; i++ {
+			if i < len(matches) && matches[i] != "" {
+				bookName = strings.TrimSpace(matches[i])
+				// 清理可能的冒号等标点
+				bookName = strings.TrimSuffix(bookName, "：")
+				bookName = strings.TrimSuffix(bookName, ":")
+				bookName = strings.TrimSuffix(bookName, "。")
+				if bookName != "" {
+					break
+				}
+			}
+		}
+
+		if bookName == "" {
+			// 如果没有匹配到书名，尝试从整个消息中提取
+			// 查找"看/读"和"第X章"之间的内容
+			afterRead := regexp.MustCompile(`(?:看|读|阅读|在看书|在读书)\s*(.+?)(?:\s+第[^\s]*?章|$)`)
+			if nameMatches := afterRead.FindStringSubmatch(message); len(nameMatches) > 1 {
+				bookName = strings.TrimSpace(nameMatches[1])
+				bookName = strings.TrimSuffix(bookName, "：")
+				bookName = strings.TrimSuffix(bookName, ":")
+				bookName = strings.TrimSuffix(bookName, "。")
+				// 提取第一个词或短语（避免包含"第二章"等）
+				if idx := strings.Index(bookName, "第"); idx > 0 {
+					bookName = strings.TrimSpace(bookName[:idx])
+				}
+			}
+		}
+
+		if bookName == "" {
+			bookName = "未知书名"
+		}
+
+		// 提取章节（从原始消息中）
+		var chapter string
+		chapterPattern := regexp.MustCompile(`(第[一两二三四五六七八九十百千万0-9]+章|第[一两二三四五六七八九十百千万0-9]+节|Chapter\s*\d+|\d+章|Part\s*\d+|第二章|第二章)`)
+		if chapterMatches := chapterPattern.FindStringSubmatch(message); len(chapterMatches) > 0 {
+			chapter = strings.TrimSpace(chapterMatches[0])
+		} else {
+			chapter = "" // 如果没有章节信息，留空
+		}
+
+		details := map[string]interface{}{
+			"book_name": bookName,
+		}
+		if chapter != "" {
+			details["chapter"] = chapter
+		}
+
+		logger.Infof("Regex matched record_activity for book: %s, chapter: %s", bookName, chapter)
+		return &ai.ParseResult{
+			Intent:     ai.IntentRecordActivity,
+			Confidence: 0.80,
+			RecordActivity: &ai.ActivityRecordInfo{
+				ActivityType: "read_book",
+				Details:      details,
+			},
+			ParsedBy:    p.GetName(),
+			ProcessTime: 0,
+			Timestamp:   time.Now(),
+		}
+	}
+
+	// 记录喝水活动
+	if matched, _ := regexp.MatchString(`(喝了|喝过|饮水).*(水|杯|毫升|ml)`, message); matched {
+		logger.Infof("Regex matched record_activity for water: %s", message)
+		return &ai.ParseResult{
+			Intent:     ai.IntentRecordActivity,
+			Confidence: 0.80,
+			RecordActivity: &ai.ActivityRecordInfo{
+				ActivityType: "drink_water",
+				Details: map[string]interface{}{
+					"amount": "1杯",
+				},
+			},
+			ParsedBy:    p.GetName(),
+			ProcessTime: 0,
+			Timestamp:   time.Now(),
+		}
+	}
+
+	// 记录运动活动（排除删除相关词汇）
+	if matched, _ := regexp.MatchString(`^(?!.*(删除|清除|去掉|移除)).*(跑步|健身|运动|锻炼|跳绳|游泳|骑车)`, message); matched {
+		logger.Infof("Regex matched record_activity for exercise: %s", message)
+		return &ai.ParseResult{
+			Intent:     ai.IntentRecordActivity,
+			Confidence: 0.80,
+			RecordActivity: &ai.ActivityRecordInfo{
+				ActivityType: "exercise",
+				Details: map[string]interface{}{
+					"type": "运动",
+				},
+			},
+			ParsedBy:    p.GetName(),
+			ProcessTime: 0,
+			Timestamp:   time.Now(),
+		}
+	}
+
+	return nil
+}
+
+// checkQueryPatterns 检查查询模式
+func (p *RegexParser) checkQueryPatterns(message string) *ai.ParseResult {
+	// 查询书籍
+	if matched, _ := regexp.MatchString(`(看过|读过|阅读|书).*(哪些|多少|哪章|哪个章节|什么|进度)`, message); matched {
+		logger.Infof("Regex matched query_activity for books: %s", message)
+		return &ai.ParseResult{
+			Intent:     ai.IntentQueryActivity,
+			Confidence: 0.85,
+			QueryActivity: &ai.ActivityQueryInfo{
+				QueryType:    "by_type",
+				ActivityType: "read_book",
+			},
+			ParsedBy:    p.GetName(),
+			ProcessTime: 0,
+			Timestamp:   time.Now(),
+		}
+	}
+
+	// 查询喝水
+	if matched, _ := regexp.MatchString(`(喝过|喝水|水).*(吗|多少|几次)`, message); matched {
+		logger.Infof("Regex matched query_activity for water: %s", message)
+		return &ai.ParseResult{
+			Intent:     ai.IntentQueryActivity,
+			Confidence: 0.85,
+			QueryActivity: &ai.ActivityQueryInfo{
+				QueryType:    "by_type",
+				ActivityType: "drink_water",
+			},
+			ParsedBy:    p.GetName(),
+			ProcessTime: 0,
+			Timestamp:   time.Now(),
+		}
+	}
+
+	// 查询运动
+	if matched, _ := regexp.MatchString(`(运动|健身|跑步|锻炼).*(多少|几次|吗)`, message); matched {
+		logger.Infof("Regex matched query_activity for exercise: %s", message)
+		return &ai.ParseResult{
+			Intent:     ai.IntentQueryActivity,
+			Confidence: 0.85,
+			QueryActivity: &ai.ActivityQueryInfo{
+				QueryType:    "by_type",
+				ActivityType: "exercise",
+			},
+			ParsedBy:    p.GetName(),
+			ProcessTime: 0,
+			Timestamp:   time.Now(),
+		}
+	}
+
+	return nil
+}
+
+// checkDeleteActivityPatterns 检查删除活动模式
+func (p *RegexParser) checkDeleteActivityPatterns(message string) *ai.ParseResult {
+	// 删除书籍记录
+	deleteBookPattern := regexp.MustCompile(`(?:删除|去掉|移除|清除|不要).*?(?:《(.+?)》|"(.+?)"|「(.+?)」|『(.+?)』|书名[是为][:是](.+?)).*?(?:记录|这条|那条)`)
+	if matches := deleteBookPattern.FindStringSubmatch(message); len(matches) > 0 {
+		var bookName string
+		// 优先从带书名号的捕获组中提取
+		for i := 1; i < len(matches); i++ {
+			if matches[i] != "" {
+				bookName = strings.TrimSpace(matches[i])
+				// 清理可能的冒号等标点
+				bookName = strings.TrimSuffix(bookName, "：")
+				bookName = strings.TrimSuffix(bookName, ":")
+				bookName = strings.TrimSuffix(bookName, "。")
+				if bookName != "" {
+					break
+				}
+			}
+		}
+
+		if bookName != "" {
+			logger.Infof("Regex matched delete_activity for book: %s", bookName)
+			return &ai.ParseResult{
+				Intent:     ai.IntentDeleteActivity,
+				Confidence: 0.85,
+				DeleteActivity: &ai.DeleteActivityInfo{
+					ActivityType: "read_book",
+					Criteria: map[string]interface{}{
+						"book_name": bookName,
+					},
+				},
+				ParsedBy:    p.GetName(),
+				ProcessTime: 0,
+				Timestamp:   time.Now(),
+			}
+		}
+	}
+
+	// 删除喝水记录（支持时间范围）
+	deleteWaterPattern := regexp.MustCompile(`(?:删除|清除|去掉|移除).*(?:昨|前|今|明|天).*?(水|喝水).*记录`)
+	if matches := deleteWaterPattern.FindStringSubmatch(message); len(matches) > 0 {
+		// 尝试提取时间范围
+		timeRange := ""
+		if strings.Contains(message, "昨天") {
+			timeRange = "昨天"
+		} else if strings.Contains(message, "前天") {
+			timeRange = "前天"
+		} else if strings.Contains(message, "今天") {
+			timeRange = "今天"
+		}
+
+		criteria := map[string]interface{}{}
+		if timeRange != "" {
+			criteria["time_range"] = timeRange
+		}
+
+		logger.Infof("Regex matched delete_activity for water: time_range=%s", timeRange)
+		return &ai.ParseResult{
+			Intent:     ai.IntentDeleteActivity,
+			Confidence: 0.85,
+			DeleteActivity: &ai.DeleteActivityInfo{
+				ActivityType: "drink_water",
+				Criteria:     criteria,
+			},
+			ParsedBy:    p.GetName(),
+			ProcessTime: 0,
+			Timestamp:   time.Now(),
+		}
+	}
+
+	// 删除运动记录
+	if matched, _ := regexp.MatchString(`(?:删除|清除|去掉|移除).*(运动|健身|跑步|锻炼).*记录`, message); matched {
+		logger.Infof("Regex matched delete_activity for exercise")
+		return &ai.ParseResult{
+			Intent:     ai.IntentDeleteActivity,
+			Confidence: 0.85,
+			DeleteActivity: &ai.DeleteActivityInfo{
+				ActivityType: "exercise",
+				Criteria:     map[string]interface{}{},
+			},
+			ParsedBy:    p.GetName(),
+			ProcessTime: 0,
+			Timestamp:   time.Now(),
+		}
+	}
+
+	return nil
 }
 
 // buildParseResult 构建解析结果

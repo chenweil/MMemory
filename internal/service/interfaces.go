@@ -88,6 +88,9 @@ type ConversationService interface {
 
 	// GetContextData 获取上下文数据
 	GetContextData(ctx context.Context, userID uint, contextType models.ContextType, target interface{}) error
+
+	// GetConversationHistory 获取用户对话历史（最近30天）
+	GetConversationHistory(ctx context.Context, userID uint, days int) (string, error)
 }
 
 // ContextManagerService 上下文管理接口

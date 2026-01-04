@@ -188,9 +188,9 @@ func TestDailyActivityService_RecordActivity(t *testing.T) {
 
 	t.Run("记录运动活动", func(t *testing.T) {
 		details := map[string]interface{}{
-			"exerciseType":   "跑步",
+			"exerciseType":     "跑步",
 			"exerciseDuration": "30分钟",
-			"distance":      "5公里",
+			"distance":         "5公里",
 		}
 
 		activity, err := service.RecordActivity(ctx, userID, models.ActivityTypeExercise, details, models.SourceReminder)
@@ -303,6 +303,14 @@ func TestDailyActivityService_GetActivityStatistics(t *testing.T) {
 		assert.GreaterOrEqual(t, stats["exercise"], int64(1))
 	})
 
+	t.Run("统计最近10天", func(t *testing.T) {
+		stats, err := service.GetActivityStatistics(ctx, userID, "最近10天")
+
+		require.NoError(t, err)
+		assert.NotNil(t, stats)
+		assert.GreaterOrEqual(t, stats["drink_water"], int64(2))
+	})
+
 	t.Run("统计今天", func(t *testing.T) {
 		stats, err := service.GetActivityStatistics(ctx, userID, "今天")
 
@@ -346,6 +354,14 @@ func TestDailyActivityService_QueryActivities(t *testing.T) {
 
 		require.NoError(t, err)
 		assert.Contains(t, response, "喝水")
+	})
+
+	t.Run("按时间查询最近10天", func(t *testing.T) {
+		response, err := service.QueryActivities(ctx, userID, "by_time", "", "最近10天")
+
+		require.NoError(t, err)
+		assert.Contains(t, response, "最近10天")
+		assert.Contains(t, response, "看书")
 	})
 
 	t.Run("按类型查询无记录", func(t *testing.T) {

@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"log"
+	"math"
 	"os"
 	"os/signal"
 	"strings"
@@ -299,6 +300,36 @@ func setupConfigListeners(configManager *config.ConfigManager, hotReloadManager 
 	})
 }
 
+// RetryConfig 重试配置
+type RetryConfig struct {
+	MaxRetries      int           // 最大重试次数
+	InitialDelay    time.Duration // 初始延迟
+	MaxDelay        time.Duration // 最大延迟
+	BackoffFactor   float64       // 退避因子
+}
+
+// DefaultRetryConfig 默认重试配置
+func DefaultRetryConfig() RetryConfig {
+	return RetryConfig{
+		MaxRetries:      5,
+		InitialDelay:    1 * time.Second,
+		MaxDelay:        60 * time.Second,
+		BackoffFactor:   2.0,
+	}
+}
+
+// calculateBackoff 计算退避延迟
+func calculateBackoff(attempt int, config RetryConfig) time.Duration {
+	if attempt == 0 {
+		return 0
+	}
+	delay := float64(config.InitialDelay) * math.Pow(config.BackoffFactor, float64(attempt-1))
+	if delay > float64(config.MaxDelay) {
+		delay = float64(config.MaxDelay)
+	}
+	return time.Duration(delay)
+}
+
 // isEOFError 检查是否为EOF相关错误
 func isEOFError(err error) bool {
 	if err == nil {
@@ -309,6 +340,35 @@ func isEOFError(err error) bool {
 		strings.Contains(errStr, "unexpected EOF") ||
 		strings.Contains(errStr, "connection reset") ||
 		strings.Contains(errStr, "broken pipe")
+}
+
+// isTransientError 检查是否为临时错误（应该重试）
+func isTransientError(err error) bool {
+	if err == nil {
+		return false
+	}
+	errStr := err.Error()
+	return strings.Contains(errStr, "timeout") ||
+		strings.Contains(errStr, "EOF") ||
+		strings.Contains(errStr, "connection reset") ||
+		strings.Contains(errStr, "broken pipe") ||
+		strings.Contains(errStr, "temporary failure") ||
+		strings.Contains(errStr, "deadline exceeded")
+}
+
+// isFatalError 检查是否为致命错误（不应该重试）
+func isFatalError(err error) bool {
+	if err == nil {
+		return false
+	}
+	errStr := err.Error()
+	return strings.Contains(errStr, "Unauthorized") ||
+		strings.Contains(errStr, "401") ||
+		strings.Contains(errStr, "403") ||
+		strings.Contains(errStr, "404") ||
+		strings.Contains(errStr, "conflict") ||
+		strings.Contains(errStr, "invalid token") ||
+		strings.Contains(errStr, "bot was blocked")
 }
 
 // logTelegramError 记录Telegram相关错误，区分错误类型
@@ -323,8 +383,9 @@ func logTelegramError(err error, operation string) {
 func startBot(ctx context.Context, botAPI *tgbotapi.BotAPI, botInterface bot.BotAPI, messageHandler *handlers.MessageHandler, callbackHandler *handlers.CallbackHandler) error {
 	logger.Info("🤖 Bot开始接收消息...")
 
-	maxRetries := 3
-	retryDelay := 5 * time.Second
+	// 使用默认重试配置（0 表示使用函数内部的默认值）
+	maxRetries := 0
+	var retryDelay time.Duration = 0
 
 	for {
 		select {
@@ -335,8 +396,9 @@ func startBot(ctx context.Context, botAPI *tgbotapi.BotAPI, botInterface bot.Bot
 
 		default:
 			if err := runUpdatesWithRetry(ctx, botAPI, botInterface, messageHandler, callbackHandler, maxRetries, retryDelay); err != nil {
-				logger.Errorf("Bot运行失败，即将重试: %v", err)
-				time.Sleep(retryDelay)
+				logger.Errorf("Bot运行失败，等待后重试: %v", err)
+				// 使用指数退避的外层延迟
+				time.Sleep(10 * time.Second)
 				continue
 			}
 		}
@@ -344,14 +406,50 @@ func startBot(ctx context.Context, botAPI *tgbotapi.BotAPI, botInterface bot.Bot
 }
 
 func runUpdatesWithRetry(ctx context.Context, botAPI *tgbotapi.BotAPI, botInterface bot.BotAPI, messageHandler *handlers.MessageHandler, callbackHandler *handlers.CallbackHandler, maxRetries int, retryDelay time.Duration) error {
-	u := tgbotapi.NewUpdate(0)
-	u.Timeout = 30 // 减少超时时间到30秒，降低网络中断风险
+	config := DefaultRetryConfig()
+	// 如果调用者提供了参数，使用调用者的参数
+	if maxRetries > 0 {
+		config.MaxRetries = maxRetries
+	}
+	if retryDelay > 0 {
+		config.InitialDelay = retryDelay
+	}
 
-	// 获取更新通道 (GetUpdatesChan 不返回错误，只返回通道)
-	updates := botAPI.GetUpdatesChan(u)
+	for attempt := 0; attempt <= config.MaxRetries; attempt++ {
+		u := tgbotapi.NewUpdate(0)
+		u.Timeout = 60 // 设置超时为60秒，与HTTP客户端的120秒总超时保持合理比例
 
-	// 处理更新（传入接口供handlers使用）
-	return processUpdates(ctx, updates, botInterface, messageHandler, callbackHandler)
+		// 获取更新通道 (GetUpdatesChan 不返回错误，只返回通道)
+		updates := botAPI.GetUpdatesChan(u)
+
+		// 处理更新（传入接口供handlers使用）
+		err := processUpdates(ctx, updates, botInterface, messageHandler, callbackHandler)
+
+		if err == nil {
+			// 成功，无需重试
+			return nil
+		}
+
+		// 检查是否为致命错误
+		if isFatalError(err) {
+			logger.Errorf("Fatal error encountered, giving up: %v", err)
+			return fmt.Errorf("fatal error: %w", err)
+		}
+
+		// 检查是否还有重试机会
+		if attempt < config.MaxRetries {
+			delay := calculateBackoff(attempt+1, config)
+			// 只在特定重试次数时记录详细日志，避免日志刷屏
+			if attempt == 0 || attempt == 2 || attempt == 4 || attempt == config.MaxRetries-1 {
+				logger.Warnf("Retry attempt %d/%d failed, retrying in %v: %v", attempt+1, config.MaxRetries, delay, err)
+			} else {
+				logger.Debugf("Retry attempt %d/%d failed, retrying in %v: %v", attempt+1, config.MaxRetries, delay, err)
+			}
+			time.Sleep(delay)
+		}
+	}
+
+	return fmt.Errorf("max retries (%d) exceeded", config.MaxRetries)
 }
 
 func processUpdates(ctx context.Context, updates tgbotapi.UpdatesChannel, botInterface bot.BotAPI, messageHandler *handlers.MessageHandler, callbackHandler *handlers.CallbackHandler) error {

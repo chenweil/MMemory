@@ -142,3 +142,20 @@ func (s *conversationService) GetContextData(ctx context.Context, userID uint, c
 
 	return nil
 }
+
+// GetConversationHistory 获取用户对话历史（最近N天）
+func (s *conversationService) GetConversationHistory(ctx context.Context, userID uint, days int) (string, error) {
+	// 默认获取30天的历史
+	if days <= 0 {
+		days = 30
+	}
+
+	// TODO: 这里需要从数据库中获取历史消息
+	// 目前 ConversationContext 模型存储了消息历史，但需要通过 ContextManagerService 来获取
+	// 为了简化实现，我们返回一个空字符串，后续可以通过集成 ContextManagerService 来完善
+
+	// 查询用户最近的对话上下文
+	// 这里需要访问 ConversationContextRepository 来获取历史记录
+	// 暂时返回空字符串，表示没有历史记录
+	return "", nil
+}

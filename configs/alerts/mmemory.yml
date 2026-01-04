@@ -110,3 +110,33 @@ groups:
         annotations:
           summary: "MMemory磁盘空间不足"
           description: "磁盘可用空间少于10%"
+
+      # 缓存命中率告警
+      - alert: CacheHitRateLow
+        expr: mmemory_cache_hit_rate < 50
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "缓存命中率过低"
+          description: "缓存 {{ $labels.cache_name }} 命中率低于 50%，策略: {{ $labels.policy }}"
+
+      # 缓存驱逐率告警
+      - alert: CacheEvictionRateHigh
+        expr: rate(mmemory_cache_evictions_total[5m]) > 10
+        for: 2m
+        labels:
+          severity: warning
+        annotations:
+          summary: "缓存驱逐率过高"
+          description: "缓存驱逐速率超过 10 次/秒"
+
+      # 缓存大小告警
+      - alert: CacheSizeHigh
+        expr: mmemory_cache_size > 9000
+        for: 5m
+        labels:
+          severity: info
+        annotations:
+          summary: "缓存接近容量上限"
+          description: "缓存大小接近上限 ({{ $value }})"

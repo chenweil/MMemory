@@ -19,6 +19,7 @@ type DailyActivityService interface {
 	GetActivitiesByDateRange(ctx context.Context, userID uint, startTime, endTime time.Time) ([]*models.DailyActivity, error)
 	GetActivityStatistics(ctx context.Context, userID uint, timeRange string) (map[string]int64, error)
 	QueryActivities(ctx context.Context, userID uint, queryType, activityType, timeRange string) (string, error)
+	DeleteActivities(ctx context.Context, userID uint, activityType models.ActivityType, criteria map[string]interface{}) (int, error)
 }
 
 type dailyActivityServiceImpl struct {
@@ -77,32 +78,7 @@ func (s *dailyActivityServiceImpl) GetActivitiesByDateRange(ctx context.Context,
 
 // GetActivityStatistics 获取活动统计
 func (s *dailyActivityServiceImpl) GetActivityStatistics(ctx context.Context, userID uint, timeRange string) (map[string]int64, error) {
-	now := time.Now()
-	var startTime, endTime time.Time
-
-	// 解析时间范围
-	switch timeRange {
-	case "今天":
-		startTime = time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, now.Location())
-		endTime = startTime.Add(24 * time.Hour)
-	case "昨天":
-		yesterday := now.AddDate(0, 0, -1)
-		startTime = time.Date(yesterday.Year(), yesterday.Month(), yesterday.Day(), 0, 0, 0, 0, now.Location())
-		endTime = startTime.Add(24 * time.Hour)
-	case "这周":
-		weekday := int(now.Weekday())
-		if weekday == 0 {
-			weekday = 7
-		}
-		startTime = time.Date(now.Year(), now.Month(), now.Day()-weekday+1, 0, 0, 0, 0, now.Location())
-		endTime = startTime.AddDate(0, 0, 7)
-	case "最近7天":
-		startTime = now.AddDate(0, 0, -7)
-		endTime = now
-	default:
-		startTime = now.AddDate(0, 0, -7)
-		endTime = now
-	}
+	startTime, endTime, _ := resolveActivityTimeRange(timeRange, time.Now())
 
 	return s.activityRepo.GetStatistics(ctx, userID, startTime, endTime)
 }
@@ -118,21 +94,12 @@ func (s *dailyActivityServiceImpl) QueryActivities(ctx context.Context, userID u
 		return s.formatActivitiesByType(activities, activityType), nil
 
 	case "by_time":
-		now := time.Now()
-		var startTime, endTime time.Time
-		if timeRange == "昨天" {
-			yesterday := now.AddDate(0, 0, -1)
-			startTime = time.Date(yesterday.Year(), yesterday.Month(), yesterday.Day(), 0, 0, 0, 0, now.Location())
-			endTime = startTime.Add(24 * time.Hour)
-		} else if timeRange == "今天" {
-			startTime = time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, now.Location())
-			endTime = startTime.Add(24 * time.Hour)
-		}
+		startTime, endTime, normalizedRange := resolveActivityTimeRange(timeRange, time.Now())
 		activities, err := s.GetActivitiesByDateRange(ctx, userID, startTime, endTime)
 		if err != nil {
 			return "", err
 		}
-		return s.formatActivitiesByTime(activities, timeRange), nil
+		return s.formatActivitiesByTime(activities, normalizedRange), nil
 
 	case "statistics":
 		stats, err := s.GetActivityStatistics(ctx, userID, timeRange)
@@ -155,13 +122,19 @@ func (s *dailyActivityServiceImpl) formatActivitiesByType(activities []*models.D
 	case "read_book":
 		books := make(map[string]string)
 		for _, act := range activities {
-			details, _ := act.GetDetails()
+			details, err := act.GetDetails()
+			logger.Infof("查询活动 ID=%d: BookName=%q, Chapter=%q, Error=%v",
+				act.ID, details.BookName, details.Chapter, err)
 			if details.BookName != "" {
 				chapter := details.Chapter
 				if chapter == "" {
 					chapter = "未知章节"
 				}
-				books[details.BookName] = chapter
+				// 只保留最新的记录（map 中不存在的才添加）
+				// 这样确保旧记录不会覆盖新记录
+				if _, exists := books[details.BookName]; !exists {
+					books[details.BookName] = chapter
+				}
 			}
 		}
 		result := "根据记录，你最近看过：\n"
@@ -232,4 +205,86 @@ func getActivityTypeDisplayName(activityType models.ActivityType) string {
 	default:
 		return string(activityType)
 	}
+}
+
+// DeleteActivities 根据条件删除活动记录
+func (s *dailyActivityServiceImpl) DeleteActivities(ctx context.Context, userID uint, activityType models.ActivityType, criteria map[string]interface{}) (int, error) {
+	// 获取所有匹配的活动（获取足够多的记录以便筛选）
+	activities, err := s.activityRepo.GetByType(ctx, userID, activityType, 100, 0)
+	if err != nil {
+		logger.Errorf("查询活动记录失败: %v", err)
+		return 0, fmt.Errorf("查询活动记录失败: %w", err)
+	}
+
+	var toDelete []uint
+
+	for _, activity := range activities {
+		details, err := activity.GetDetails()
+		if err != nil {
+			logger.Warnf("解析活动详情失败 (ID=%d): %v", activity.ID, err)
+			continue
+		}
+
+		// 根据活动类型和条件筛选
+		switch activityType {
+		case models.ActivityTypeReadBook:
+			// 根据书名删除
+			if bookName, ok := criteria["book_name"].(string); ok {
+				if details.BookName == bookName {
+					toDelete = append(toDelete, activity.ID)
+				}
+			}
+
+		case models.ActivityTypeDrinkWater:
+			// 删除所有喝水记录或按时间范围
+			if timeRange, ok := criteria["time_range"].(string); ok {
+				// 根据时间范围筛选
+				startTime, endTime, _ := resolveActivityTimeRange(timeRange, time.Now())
+				if activity.OccurredAt.After(startTime) && activity.OccurredAt.Before(endTime) {
+					toDelete = append(toDelete, activity.ID)
+				}
+			} else {
+				// 没有指定时间范围，删除所有
+				toDelete = append(toDelete, activity.ID)
+			}
+
+		case models.ActivityTypeExercise:
+			// 删除运动记录 - 可以根据运动类型筛选
+			if exerciseType, ok := criteria["exercise_type"].(string); ok {
+				if details.ExerciseType == exerciseType {
+					toDelete = append(toDelete, activity.ID)
+				}
+			} else {
+				// 删除所有运动记录
+				toDelete = append(toDelete, activity.ID)
+			}
+
+		case models.ActivityTypeTakeMedicine:
+			// 根据药名删除
+			if medicineName, ok := criteria["medicine_name"].(string); ok {
+				if details.MedicineName == medicineName {
+					toDelete = append(toDelete, activity.ID)
+				}
+			}
+
+		default:
+			// 其他类型，如果没有具体条件，删除所有
+			if len(criteria) == 0 {
+				toDelete = append(toDelete, activity.ID)
+			}
+		}
+	}
+
+	// 批量删除
+	deleted := 0
+	for _, id := range toDelete {
+		if err := s.activityRepo.Delete(ctx, id); err != nil {
+			logger.Errorf("删除活动记录失败 (ID=%d): %v", id, err)
+		} else {
+			deleted++
+		}
+	}
+
+	logger.Infof("用户 %d 删除了 %d 条 %s 记录", userID, deleted, activityType)
+	return deleted, nil
 }

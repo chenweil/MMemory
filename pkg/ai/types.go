@@ -22,6 +22,7 @@ const (
 	IntentWeather          ParseIntent = "weather"              // 天气查询
 	IntentRecordActivity   ParseIntent = "record_activity"      // 记录活动
 	IntentQueryActivity    ParseIntent = "query_activity"       // 查询活动
+	IntentDeleteActivity   ParseIntent = "delete_activity"      // 删除活动记录
 	IntentActivitySummary  ParseIntent = "activity_summary"     // 活动统计
 	IntentActivityVisualize ParseIntent = "activity_visualize"  // 活动可视化
 	IntentActivityAnalysis ParseIntent = "activity_analysis"    // 智能分析
@@ -42,6 +43,7 @@ func (i ParseIntent) IsValid() bool {
 		IntentWeather,
 		IntentRecordActivity,
 		IntentQueryActivity,
+		IntentDeleteActivity,
 		IntentActivitySummary,
 		IntentActivityVisualize,
 		IntentActivityAnalysis,
@@ -86,6 +88,9 @@ type ParseResult struct {
 
 	// 活动查询相关（当Intent为query_activity时）
 	QueryActivity *ActivityQueryInfo `json:"query_activity,omitempty"`
+
+	// 活动删除相关（当Intent为delete_activity时）
+	DeleteActivity *DeleteActivityInfo `json:"delete_activity,omitempty"`
 
 	// 活动可视化相关（当Intent为activity_visualize时）
 	ActivityVisualize *ActivityVisualizeInfo `json:"activity_visualize,omitempty"`
@@ -173,6 +178,12 @@ type ActivityQueryInfo struct {
 	QueryType    string `json:"query_type"`              // "by_type", "by_time", "statistics"
 	ActivityType string `json:"activity_type,omitempty"` // 活动类型
 	TimeRange    string `json:"time_range,omitempty"`    // "今天", "昨天", "最近7天", "这周"
+}
+
+// DeleteActivityInfo 删除活动信息
+type DeleteActivityInfo struct {
+	ActivityType string                 `json:"activity_type"` // "read_book", "drink_water" 等
+	Criteria     map[string]interface{} `json:"criteria"`      // 删除条件：book_name, time_range等
 }
 
 // ActivityVisualizeInfo 活动可视化信息
@@ -330,6 +341,12 @@ func (pr *ParseResult) Validate() ValidationResult {
 			errors = append(errors, "query activity info is required for query_activity intent")
 		} else if pr.QueryActivity.QueryType == "" {
 			errors = append(errors, "query type is required for query_activity intent")
+		}
+	case IntentDeleteActivity:
+		if pr.DeleteActivity == nil {
+			errors = append(errors, "delete activity info is required for delete_activity intent")
+		} else if pr.DeleteActivity.ActivityType == "" {
+			errors = append(errors, "activity type is required for delete_activity intent")
 		}
 	case IntentChat:
 		if pr.ChatResponse == nil {

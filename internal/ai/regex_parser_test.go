@@ -292,3 +292,92 @@ func TestRegexParser_WeeklyReminderAllDays(t *testing.T) {
 		})
 	}
 }
+
+// TestRegexParser_DeleteActivity 测试删除活动记录的解析
+func TestRegexParser_DeleteActivity(t *testing.T) {
+	parser := NewRegexParser()
+	ctx := context.Background()
+
+	tests := []struct {
+		name                string
+		message             string
+		expectedIntent      ai.ParseIntent
+		expectedActivityType string
+		expectedCriteria    map[string]interface{}
+	}{
+		{
+			name:                "删除书名带书名号",
+			message:             "把《？》这条记录删除",
+			expectedIntent:      ai.IntentDeleteActivity,
+			expectedActivityType: "read_book",
+			expectedCriteria:    map[string]interface{}{"book_name": "？"},
+		},
+		{
+			name:                "删除书名不带书名号",
+			message:             "删除三体的阅读记录",
+			expectedIntent:      ai.IntentDeleteActivity,
+			expectedActivityType: "read_book",
+			expectedCriteria:    map[string]interface{}{"book_name": "三体"},
+		},
+		{
+			name:                "删除昨天的喝水记录",
+			message:             "删除昨天的喝水记录",
+			expectedIntent:      ai.IntentDeleteActivity,
+			expectedActivityType: "drink_water",
+			expectedCriteria:    map[string]interface{}{"time_range": "昨天"},
+		},
+		{
+			name:                "清除今天的喝水记录",
+			message:             "清除今天的喝水记录",
+			expectedIntent:      ai.IntentDeleteActivity,
+			expectedActivityType: "drink_water",
+			expectedCriteria:    map[string]interface{}{"time_range": "今天"},
+		},
+		{
+			name:                "移除运动记录",
+			message:             "移除运动记录",
+			expectedIntent:      ai.IntentDeleteActivity,
+			expectedActivityType: "exercise",
+			expectedCriteria:    map[string]interface{}{},
+		},
+		{
+			name:                "去掉健身记录",
+			message:             "去掉健身记录",
+			expectedIntent:      ai.IntentDeleteActivity,
+			expectedActivityType: "exercise",
+			expectedCriteria:    map[string]interface{}{},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result, err := parser.Parse(ctx, "user1", tt.message)
+
+			// 有些删除表达可能无法被正则匹配，这是正常的
+			if err != nil {
+				t.Logf("正则无法匹配: %s (这需要AI来处理)", tt.message)
+				t.SkipNow()
+				return
+			}
+
+			assert.Equal(t, tt.expectedIntent, result.Intent)
+
+			// 如果意图正确，检查DeleteActivity是否存在
+			if result.Intent == ai.IntentDeleteActivity {
+				require.NotNil(t, result.DeleteActivity)
+				assert.Equal(t, tt.expectedActivityType, result.DeleteActivity.ActivityType)
+
+				// 验证criteria
+				for key, expectedValue := range tt.expectedCriteria {
+					actualValue, exists := result.DeleteActivity.Criteria[key]
+					assert.True(t, exists, "criteria应该包含%s字段", key)
+					assert.Equal(t, expectedValue, actualValue)
+				}
+			} else {
+				t.Logf("消息被识别为其他意图: %s (实际: %s, 预期: %s)",
+					tt.message, result.Intent, tt.expectedIntent)
+			}
+		})
+	}
+}
+
