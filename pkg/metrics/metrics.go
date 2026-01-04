@@ -557,3 +557,81 @@ func RecordCacheItemAdded() {
 func RecordCacheItemHit() {
 	CacheItemsHitTotal.Inc()
 }
+// ========== 上下文管理指标 ==========
+
+var (
+	// ContextCleanupTotal 上下文清理总次数
+	ContextCleanupTotal = promauto.NewCounterVec(
+		prometheus.CounterOpts{
+			Name: "mmemory_context_cleanup_total",
+			Help: "Total number of context cleanup operations",
+		},
+		[]string{"user_id", "strategy"}, // strategy: smart_clean, force_clean
+	)
+
+	// ContextCompressionTotal 上下文压缩总次数
+	ContextCompressionTotal = promauto.NewCounterVec(
+		prometheus.CounterOpts{
+			Name: "mmemory_context_compression_total",
+			Help: "Total number of context compression operations",
+		},
+		[]string{"user_id", "success"}, // success: true, false
+	)
+
+	// ContextTokenUsageGauge 上下文Token使用率
+	ContextTokenUsageGauge = promauto.NewGaugeVec(
+		prometheus.GaugeOpts{
+			Name: "mmemory_context_token_usage_ratio",
+			Help: "Context token usage ratio (0-1)",
+		},
+		[]string{"user_id"},
+	)
+
+	// ContextArchiveFailureTotal 存档失败总次数
+	ContextArchiveFailureTotal = promauto.NewCounterVec(
+		prometheus.CounterOpts{
+			Name: "mmemory_context_archive_failure_total",
+			Help: "Total number of archive failures",
+		},
+		[]string{"user_id", "archive_type"}, // archive_type: full, summary
+	)
+
+	// ContextArchiveDuration 存档耗时直方图
+	ContextArchiveDuration = promauto.NewHistogramVec(
+		prometheus.HistogramOpts{
+			Name:    "mmemory_context_archive_duration_seconds",
+			Help:    "Duration of archive creation in seconds",
+			Buckets: prometheus.DefBuckets,
+		},
+		[]string{"archive_type"},
+	)
+)
+
+// RecordContextCleanup 记录上下文清理
+func RecordContextCleanup(userID string, strategy string) {
+	ContextCleanupTotal.WithLabelValues(userID, strategy).Inc()
+}
+
+// RecordContextCompression 记录上下文压缩
+func RecordContextCompression(userID string, success bool) {
+	successStr := "false"
+	if success {
+		successStr = "true"
+	}
+	ContextCompressionTotal.WithLabelValues(userID, successStr).Inc()
+}
+
+// SetContextTokenUsage 设置上下文Token使用率
+func SetContextTokenUsage(userID string, ratio float64) {
+	ContextTokenUsageGauge.WithLabelValues(userID).Set(ratio)
+}
+
+// RecordArchiveFailure 记录存档失败
+func RecordArchiveFailure(userID, archiveType string) {
+	ContextArchiveFailureTotal.WithLabelValues(userID, archiveType).Inc()
+}
+
+// RecordArchiveDuration 记录存档耗时
+func RecordArchiveDuration(archiveType string, duration float64) {
+	ContextArchiveDuration.WithLabelValues(archiveType).Observe(duration)
+}

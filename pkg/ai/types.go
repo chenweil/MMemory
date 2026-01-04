@@ -1,6 +1,7 @@
 package ai
 
 import (
+	"context"
 	"strings"
 	"time"
 
@@ -463,4 +464,13 @@ func filterEmpty(values []string) []string {
 		}
 	}
 	return filtered
+}
+
+// AIClient AI客户端接口（用于存档服务等需要简单AI调用的场景）
+type AIClient interface {
+	// GenerateChatResponse 生成聊天响应（用于对话摘要等场景）
+	GenerateChatResponse(ctx context.Context, message string, history string) (string, error)
+
+	// GenerateResponse 生成解析响应（用于提醒解析等场景）
+	GenerateResponse(ctx context.Context, prompt string, history string) (*ParseResult, error)
 }
