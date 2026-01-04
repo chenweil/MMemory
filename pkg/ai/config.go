@@ -6,9 +6,10 @@ import (
 
 // AIConfig AI配置结构
 type AIConfig struct {
-	Enabled bool          `mapstructure:"enabled" yaml:"enabled"`
-	OpenAI  OpenAIConfig  `mapstructure:"openai" yaml:"openai"`
-	Prompts PromptsConfig `mapstructure:"prompts" yaml:"prompts"`
+	Enabled            bool                      `mapstructure:"enabled" yaml:"enabled"`
+	OpenAI             OpenAIConfig               `mapstructure:"openai" yaml:"openai"`
+	Prompts            PromptsConfig              `mapstructure:"prompts" yaml:"prompts"`
+	ContextManagement ContextManagementConfig    `mapstructure:"context_management" yaml:"context_management"`
 }
 
 // OpenAIConfig OpenAI配置
@@ -23,11 +24,35 @@ type OpenAIConfig struct {
 	MaxRetries   int           `mapstructure:"max_retries" yaml:"max_retries"`
 }
 
-// PromptsConfig Prompt模板配置
+// PromptsConfig Prompt��板配置
 type PromptsConfig struct {
 	ReminderParse string `mapstructure:"reminder_parse" yaml:"reminder_parse"`
 	ChatResponse  string `mapstructure:"chat_response" yaml:"chat_response"`
 	ActivityReply string `mapstructure:"activity_reply" yaml:"activity_reply"` // 活动记录个性化回复
+}
+
+// ContextManagementConfig 上下文管理配置
+type ContextManagementConfig struct {
+	Enabled bool `mapstructure:"enabled" yaml:"enabled"` // 是否启用上下文管理
+	// Compression 压缩配置
+	Compression CompressionConfig `mapstructure:"compression" yaml:"compression"`
+	// Archive 归档配置
+	Archive ArchiveConfig `mapstructure:"archive" yaml:"archive"`
+}
+
+// CompressionConfig 压缩配置
+type CompressionConfig struct {
+	AISummaryEnabled bool `mapstructure:"ai_summary_enabled" yaml:"ai_summary_enabled"` // 是否启用AI摘要
+	MaxSummaryLength int  `mapstructure:"max_summary_length" yaml:"max_summary_length"`   // 最大摘要长度
+	WarningThreshold  float64 `mapstructure:"warning_threshold" yaml:"warning_threshold"`   // 警告阈值（如0.8表示80%）
+	HardLimitThreshold float64 `mapstructure:"hard_limit_threshold" yaml:"hard_limit_threshold"` // 硬限制阈值（如0.95表示95%）
+}
+
+// ArchiveConfig 归档配置
+type ArchiveConfig struct {
+	FullContentTTL  time.Duration `mapstructure:"full_content_ttl" yaml:"full_content_ttl"`   // 完整内容TTL
+	EnableAsync     bool          `mapstructure:"enable_async" yaml:"enable_async"`            // 是否异步归档
+	AutoCleanup     bool          `mapstructure:"auto_cleanup" yaml:"auto_cleanup"`             // 是否自动清理
 }
 
 // GetDefaultAIConfig 获取默认AI配置
@@ -47,6 +72,20 @@ func GetDefaultAIConfig() *AIConfig {
 			ReminderParse: getDefaultReminderPrompt(),
 			ChatResponse:  getDefaultChatPrompt(),
 			ActivityReply: GetDefaultActivityReplyPrompt(),
+		},
+		ContextManagement: ContextManagementConfig{
+			Enabled: true, // 默认启用上下文管理
+			Compression: CompressionConfig{
+				AISummaryEnabled:    true,  // 默认启用AI摘要
+				MaxSummaryLength:    200,   // 默认最大200字摘要
+				WarningThreshold:    0.80,  // 80%警告阈值
+				HardLimitThreshold:  0.95,  // 95%硬限制阈值
+			},
+			Archive: ArchiveConfig{
+				FullContentTTL: 720 * time.Hour, // 完整内容30天过期
+				EnableAsync:    true,             // 默认异步归档
+				AutoCleanup:    true,             // 默认自动清理
+			},
 		},
 	}
 }
