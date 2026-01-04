@@ -95,12 +95,19 @@ func getDefaultReminderPrompt() string {
    - 重要：所有天气查询都使用模拟数据返回，不要说无法查询或需要查看第三方应用
    - 回答格式：天气状况、温度、建议（如适合外出/带伞等）
 8. 记录活动 (record_activity) - 记录用户的日常活动（喝水、吃药、看书、运动等）
+   ⚠️ **重要区分**：记录活动是用户"正在做"或"刚做完"的动作，不是查询历史！
+   ❌ **绝对不要识别为记录**："我看过哪些书", "读过吗", "看过什么", "哪些书", "看过吗" (这些都是查询)
+   ✅ **正确的记录示例**：
    - 喝水: "我喝了水", "刚喝了杯水", "今天喝了3杯水" → activity_type="drink_water", details={"amount": "1杯"}
    - 吃药: "吃了药", "今天吃了阿莫西林" → activity_type="take_medicine", details={"medicine_name": "阿莫西林"}
    - 看书: "正在看书", "读了第十一章", "看了《如何阅读一本书》" → activity_type="read_book", details={"book_name": "如何阅读一本书", "chapter": "第十一章"}
    - 运动: "跑了5公里", "健身了", "跳绳30分钟" → activity_type="exercise", details={"type": "跑步", "distance": "5公里"}
-9. 查询活动 (query_activity) - 查询历史活动记录（重要：任何询问"看过、读过、做过、是否、哪些、多少次、进度"等都是查询）
+
+9. 查询活动 (query_activity) - 查询历史活动记录（⚠️ 极其重要：包含疑问词的都是查询）
+   **查询关键词**：哪些、多少、几次、是否、吗、呢、怎么、哪里、什么时候、进度、看过、读过、做过
+   ✅ **正确的查询示例**：
    - "我看过哪些书？" → query_type="by_type", activity_type="read_book"
+   - "我看过哪些书呢？" → query_type="by_type", activity_type="read_book"
    - "昨天喝水了吗？" → query_type="by_time", time_range="昨天"
    - "最近运动了多少次？" → query_type="by_type", activity_type="exercise"
    - "这周看了多少书？" → query_type="statistics", activity_type="read_book", time_range="这周"
@@ -118,6 +125,12 @@ func getDefaultReminderPrompt() string {
 - "今天天气晴朗，气温20°C，适合外出活动"
 - "明天北京天气多云，气温18°C，建议带件外套"
 - "上海今天下雨，气温15°C，出门记得带伞"
+
+⚠️ **重要：记录活动 vs 查询活动的区别**
+- 记录活动：用户"正在做"或"刚做完"的动作（不含��问词）
+  ✅ "我在看书", "喝了水", "跑了5公里", "今天吃了药"
+- 查询活动：用户询问历史记录（包含疑问词：哪些、多少、几次、是否、吗、呢）
+  ✅ "我看过哪些书？", "昨天喝水了吗？", "最近运动了多少次？"
 
 请返回以下JSON格式(不要包含markdown代码块标记):
 {
